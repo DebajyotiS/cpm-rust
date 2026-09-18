@@ -1,0 +1,35 @@
+[package]
+name = "cpm-py"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+name = "_cpm"
+crate-type = ["cdylib"]
+
+[dependencies]
+cpm-core = { path = "../cpm-core" }
+pyo3 = { version = "0.22" }
+numpy = { version = "0.22" }
+
+# `cargo test`'s binary is not embedded in a running Python process, so
+# without this, any test that touches a Python API (e.g. constructing a
+# `PyErr`, which needs to look up the exception type object) panics with
+# "the Python interpreter is not initialized." `auto-initialize` makes
+# PyO3 start one on first use; only needed for tests, never for the actual
+# extension module (which is always loaded into an already-running
+# interpreter), hence `[dev-dependencies]` rather than the main dependency.
+[dev-dependencies]
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
+
+# `extension-module` assumes the compiled library will be dlopen'd by an
+# already-running Python process, which supplies the CPython C API symbols
+# at load time. A `cargo test`/`cargo build` binary has no such process, so
+# it fails to link if this feature is on by default. Keeping it opt-in (off
+# for plain `cargo test`/`clippy`, which then link a real libpython found via
+# `pyo3-build-config`) and having maturin request it explicitly
+# (`pyproject.toml`'s `[tool.maturin] features`) is PyO3's own documented
+# fix for this.
+[features]
+extension-module = ["pyo3/extension-module"]
