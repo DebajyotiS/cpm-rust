@@ -1,0 +1,56 @@
+name: Slow correctness tests
+
+# The brute-force bookkeeping checker and the exact-Boltzmann validation tests
+# catche silent incremental-bookkeeping drift), but they run >10 minutes.
+#
+#   - nightly, as a standing correctness net
+#   - on every push to main, so a bad merge is caught immediately rather than
+#     waiting for the next scheduled run
+#   - on any pull request that touches a correctness-critical module, so the
+#     one class of bug this checker exists to catch can't land silently
+#   - on demand, via workflow_dispatch
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "crates/cpm-core/src/energy.rs"
+      - "crates/cpm-core/src/dynamics.rs"
+      - "crates/cpm-core/src/connectivity.rs"
+      - "crates/cpm-core/src/simple_point.rs"
+      - "crates/cpm-core/src/monte_carlo.rs"
+      - "crates/cpm-core/src/state.rs"
+      - "crates/cpm-core/src/theta.rs"
+      - "crates/cpm-core/src/checker.rs"
+      - "crates/cpm-core/src/edge_list.rs"
+  workflow_dispatch: {}
+
+concurrency:
+  group: slow-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  brute-force-checker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Brute-force bookkeeping consistency checker
+        run: cargo test -p cpm-core --release --features checker -- --ignored
+
+  exact-boltzmann:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Exact Boltzmann validation (2D, enumerated microstates)
+        run: cargo test -p cpm-core --release --test exact_boltzmann -- --ignored

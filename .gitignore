@@ -1,0 +1,31 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+*.so
+*.pyd
+
+# Editors / OS
+.DS_Store
+*.swp
+
+# maturin
+wheels/
+
+#AI
+.claude
+CLAUDE.md
+docs/
+README-SETUP.md
+install.sh
