@@ -1,5 +1,18 @@
 # cpm
 
+```
+ ██████╗██████╗ ███╗   ███╗      ██████╗ ██╗   ██╗███████╗████████╗
+██╔════╝██╔══██╗████╗ ████║      ██╔══██╗██║   ██║██╔════╝╚══██╔══╝
+██║     ██████╔╝██╔████╔██║█████╗██████╔╝██║   ██║███████╗   ██║
+██║     ██╔═══╝ ██║╚██╔╝██║╚════╝██╔══██╗██║   ██║╚════██║   ██║
+╚██████╗██║     ██║ ╚═╝ ██║      ██║  ██║╚██████╔╝███████║   ██║
+ ╚═════╝╚═╝     ╚═╝     ╚═╝      ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝
+```
+
+![Rust](https://img.shields.io/badge/rust-1.80%2B-orange?logo=rust&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
 A Cellular Potts Model (CPM) simulator for organoid tissue. The computational core (`cpm-core`) is pure Rust and generic over 2D and 3D spatial dimensions from a single implementation. Python bindings (`cpm-py`) expose the engine through a user-facing Python package (`python/cpm`).
 
 The simulator serves as a forward model for simulation-based inference (TMNRE) on organoid imaging data:
@@ -99,7 +112,11 @@ Dimensionality is inferred from the shape of the `grid` argument passed during i
 
 ## Installation & Setup
 
-Requires Rust (edition 2021, MSRV 1.80) and Python >= 3.9.
+Requires Rust (edition 2021, MSRV 1.80) and Python >= 3.9. There is no published
+wheel yet, so `cpm` is only available by building from source — pre-built wheel
+distribution is on the roadmap.
+
+### Working in this repo
 
 ```bash
 # Create virtual environment and install dependencies
@@ -111,6 +128,24 @@ maturin develop
 ```
 
 Rebuild with `maturin develop` when modifying Rust code in `crates/`. Changes to Python code under `python/cpm/` will apply immediately.
+
+### Using `cpm` from another project
+
+`cpm-py` depends on `cpm-core` via a local path within this repo rather than a
+published crate, so building the extension needs this whole repo, not just the
+Python package directory. From another project's environment:
+
+```bash
+pip install /path/to/cpm            # local checkout
+# or, once this repo has a remote:
+pip install git+<repo-url>
+```
+
+Either form requires a Rust toolchain on the machine running the install — `pip`
+invokes `maturin`, which compiles `cpm-py` (and its `cpm-core` dependency) from
+source via the `[tool.maturin]` config in `pyproject.toml`. There is no way to
+depend on just the compiled extension without either building it yourself or
+installing a wheel someone else built.
 
 ## Quickstart
 
