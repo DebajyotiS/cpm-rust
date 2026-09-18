@@ -202,7 +202,7 @@ fn canonical_neighbour<const D: usize>(
 fn scatter_and_grow<const D: usize>(cpm: &mut CPM<D>) -> Result<(), InitError> {
     let mut type_of_cell: Vec<usize> = Vec::new();
     for (type_index, &count) in cpm.config.cell_counts.iter().enumerate() {
-        type_of_cell.extend(std::iter::repeat(type_index).take(count));
+        type_of_cell.extend(std::iter::repeat_n(type_index, count));
     }
     let n_cells = type_of_cell.len();
     if n_cells == 0 {
