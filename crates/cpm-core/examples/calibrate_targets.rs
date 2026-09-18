@@ -1,29 +1,15 @@
-//! Measures target volume and target interface (`V*`/`I*`) for a cell type
-//! by relaxing a single cell to equilibrium.
+//! Measures target volume and target interface (`V*`/`I*`) for a cell type by relaxing a single cell to equilibrium.
 //!
-//! **Adhesion is not fully disabled during relaxation, and that's
-//! deliberate, confirmed by measurement rather than assumed.** Disabling
-//! adhesion entirely (`adhesion = 0`, `lambda_interface = 0`) leaves nothing
-//! in `H` to penalise surface area, and the measured equilibrium is a thin,
-//! branching, snake-like shape, not a blob — e.g. `V*=40 -> I*~140` (vs.
-//! ~35-45 for a compact 40-site blob under Moore contact counting),
-//! confirmed stable (not a burn-in artefact) across a 10x longer burn-in,
-//! and confirmed visually via an ASCII dump of the final shape. This is a
-//! real, known property of the classic Potts/CPM model — with zero surface
-//! tension, entropy over the space of connected same-volume shapes favours
-//! ramified configurations over compact ones, which is exactly why Graner &
-//! Glazier's original CPM needed a contact-energy term in the first place.
-//! See `diagnose()` for the full evidence trail (stronger `lambda_volume`,
-//! longer burn-in, a smaller system, the shape dump).
+//! **Adhesion is deliberately kept active during relaxation.** Disabling adhesion entirely (`adhesion = 0`, `lambda_interface = 0`)
+//! removes all surface area penalties from `H`. Without surface tension, topological entropy favors thin, branching, snake-like
+//! shapes over compact blobs—for example, `V*=40` yields `I*~140` (compared to ~35-45 for a compact 40-site blob under Moore counting).
+//! This is a well-known property of the classic Potts model: zero surface tension drives entropy-dominated shape branching, which is
+//! why Graner & Glazier's original CPM required contact energy terms in the first place. See `diagnose()` for the full diagnostic
+//! trace and ASCII shape dumps.
 //!
-//! So `calibrate()` below keeps `lambda_interface = 0` (still measuring
-//! `I*`, not presupposing it) but gives the cell a small, production-
-//! representative cell-medium adhesion instead of zero — the same
-//! cell-medium `J` value `config::test_support::two_type_config` uses for
-//! that cell type — so the relaxation has the surface tension a real run
-//! would have, and `I*` describes what that cell type's shape actually
-//! settles into under its own real conventions rather than an artificially
-//! surface-tension-free one.
+//! To measure realistic equilibrium shapes, `calibrate()` sets `lambda_interface = 0` (so `I*` is measured rather than assumed) while
+//! applying a small, production-representative cell-medium adhesion `J`. This provides the baseline surface tension present in real
+//! simulation runs so `I*` reflects the cell's actual equilibrium geometry.
 //!
 //! Run with `cargo run -p cpm-core --release --example calibrate_targets`.
 

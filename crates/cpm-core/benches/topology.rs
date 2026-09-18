@@ -1,11 +1,11 @@
-//! Compares simple-point table lookup against direct computation in 3D.
-//! The 8 MiB 3D table doesn't fit in L2 and its lookups are effectively
-//! random, so the table's win over direct computation has to be measured
-//! rather than assumed. Both paths are fed the **same patterns**, harvested
-//! from real attempts against a confluent-density 3D fixture — not
-//! synthetic random 26-bit patterns — so cache behaviour reflects what
-//! `preserves_topology` actually sees in a real run, not an artificial
-//! worst (or best) case.
+//! Compares simple-point table lookups against direct computation in 3D.
+//! The 8 MiB 3D table exceeds L2 cache capacity and generates effectively
+//! random lookup patterns, so its performance advantage over direct computation
+//! must be measured directly rather than assumed. Both paths process the
+//! **exact same patterns**, harvested from real attempts against a confluent-density
+//! 3D fixture rather than synthetic random 26-bit patterns. This ensures cache
+//! behavior reflects what `preserves_topology` encounters during an actual run
+//! (and not an artificial worst or best case).
 
 use cpm_core::cell::CellType;
 use cpm_core::config::UserConfig;

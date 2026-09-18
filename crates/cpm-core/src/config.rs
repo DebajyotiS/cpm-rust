@@ -1,4 +1,4 @@
-//! The resolved configuration schema — the centre of the design.
+//! The resolved configuration schema is the centre of the design.
 //! Everything scientifically meaningful is a field of [`ResolvedConfig`]; if
 //! a behaviour depends on a value, that value lives here, because otherwise
 //! it is invisible to [`convention_hash`] and a run is not reproducible from

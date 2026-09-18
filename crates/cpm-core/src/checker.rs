@@ -1,25 +1,23 @@
-//! The brute-force consistency checker — the single highest-value test in
-//! the project. After every accepted move, recompute every cell's volume
-//! and interface measure from scratch and assert **exact** agreement with
-//! the incrementally maintained values (volumes and interface counts are
-//! integer-derived, so equality is exact, not approximate — confirmed
-//! empirically here too: [`check`] never observed a volume/interface
-//! mismatch smaller than a genuine bookkeeping bug would produce).
-//! Incremental bookkeeping drift is the classic silent CPM bug — it
-//! produces simulations that look entirely plausible and are physically
-//! wrong.
+//! The brute-force consistency checker, after every accepted move, recomputes every cell's volume
+//! and interface measure from scratch and asserts **exact** agreement with
+//! the incrementally maintained values. Because volumes and interface counts
+//! are integer-derived, equality is exact rather than approximate—a fact confirmed
+//! empirically here as well: [`check`] has never observed a volume or interface
+//! mismatch smaller than what a genuine bookkeeping bug would produce.
+//! Incremental bookkeeping drift is the classic silent CPM bug: it produces
+//! simulations that look entirely plausible while being physically wrong.
 //!
-//! The global conservative energy is the one exception to bit-exactness:
-//! [`crate::state::State::conservative_energy`] is a running sum of many
-//! `+=` deltas, and floating-point addition isn't associative, so it
-//! measurably drifts from a fresh direct sum by ordinary rounding noise
-//! (see [`check`]'s comment for the empirical number). That comparison uses
-//! a tight relative tolerance instead of `==`.
+//! The global conservative energy is the sole exception to bit-exactness:
+//! [`crate::state::State::conservative_energy`] maintains a running sum of many
+//! `+=` deltas. Because floating-point addition is non-associative, it
+//! measurably drifts from a direct sum due to standard rounding noise
+//! (see [`check`]'s comments for empirical measurements). That comparison uses
+//! a tight relative tolerance instead of exact equality (`==`).
 //!
-//! [`check`] itself is always compiled (it's cheap enough to call from
-//! ordinary tests too); the `#[ignore]`d, `checker`-feature-gated test that
-//! runs it after every accepted move across ~1e5 attempts is what the
-//! `checker` Cargo feature exists for.
+//! The [`check`] function itself is always compiled and lightweight enough
+//! to run inside standard unit tests. The `#[ignore]`d test—which runs this check
+//! after every accepted move across ~1e5 attempts—is gated behind the `checker`
+//! Cargo feature.
 
 use crate::model::CPM;
 use crate::state::{index_of, recompute_contact};

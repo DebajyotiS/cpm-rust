@@ -1,36 +1,36 @@
-//! Profiling fixtures at inference-scale sizing regimes — confluent
-//! (`phi ≈ 0.8`), not the sparse correctness-milestone configs
-//! `benches/monte_carlo.rs` uses (10 cells in 900 or 27,000 sites, under 1%
-//! occupied in 3D). Those milestone numbers answer "is the simulator
+//! Profiling fixtures for inference-scale sizing regimes—confluent
+//! (`phi ≈ 0.8`), rather than the sparse correctness-milestone configs
+//! in `benches/monte_carlo.rs` (10 cells in 900 or 27,000 sites, under 1%
+//! occupied in 3D). The milestone numbers answer "is the simulator
 //! correct at a size we can also brute-force check"; these answer "what
 //! does an inference-scale run actually cost."
 //!
 //! The 3D fixture starts from a worked inference example (40^3, 100 cells,
-//! `V* ≈ 512`, `phi = 0.8`) but had to be adjusted — see
-//! [`build_confluent_3d`]'s doc comment for why `phi = 0.8` isn't reachable
+//! `V* ≈ 512`, `phi = 0.8`) but required adjustments—see
+//! [`build_confluent_3d`]'s doc comment for why `phi = 0.8` is unreachable
 //! through `scatter_and_grow` at that cell size in 3D, and what density is
 //! used instead. The 2D fixture targets "~200x200, ~200 cells" at
-//! `phi = 0.8`, which `scatter_and_grow` seeds without trouble in 2D.
+//! `phi = 0.8`, which `scatter_and_grow` seeds without issue in 2D.
 //!
 //! **Methodology fix, not just new fixtures.** The existing
 //! `attempt_*_milestone` benchmarks in `monte_carlo.rs` use `iter_batched`
-//! with a fixed seed, so every criterion iteration re-measures the exact
-//! same deterministic first RNG draw from a freshly re-initialised lattice —
-//! a sample size of one, not an average over the population of attempts a
-//! real run experiences. Here, each timed iteration instead runs a batch of
-//! many attempts (`ATTEMPTS_PER_BATCH`) against an already fully-grown
-//! fixture, so the measured cost is a genuine average over many different
-//! sampled sites, not one repeated deterministic event.
+//! with a fixed seed, so every Criterion iteration re-measures the exact
+//! same deterministic first RNG draw from a freshly re-initialized lattice—
+//! a sample size of one, rather than an average over the population of attempts a
+//! real run experiences. Here, each timed iteration runs a batch of
+//! many attempts (`ATTEMPTS_PER_BATCH`) against a fully-grown
+//! fixture, ensuring the measured cost is a genuine average over many different
+//! sampled sites rather than a repeated deterministic event.
 //!
 //! Growing the confluent fixtures (`initialize`'s scatter-and-grow, placing
-//! and growing every cell to its full target volume) is real work — up to
-//! ~50k accepted growth steps for the 3D fixture — so each fixture is built
-//! **once** per benchmark function, outside any timed region, and every
-//! criterion iteration gets a cheap clone of the already-grown `State`
+//! and growing every cell to its full target volume) involves significant computation—up to
+//! ~50k accepted growth steps for the 3D fixture—so each fixture is built
+//! **once** per benchmark function outside any timed region. Every
+//! Criterion iteration receives a cheap clone of the pre-grown `State`
 //! (`State` derives `Clone`; rebuilding a fresh `CPM` from the same
-//! `ResolvedConfig` is itself O(1)-ish — lattice/offset-table allocation
-//! only — so `CPM::new(config.clone())` plus overwriting `.state` is far
-//! cheaper than re-running scatter-and-grow every iteration).
+//! `ResolvedConfig` is O(1)-ish—lattice and offset-table allocation
+//! only—making `CPM::new(config.clone())` plus overwriting `.state` far
+//! cheaper than re-running scatter-and-grow on every iteration).
 
 use cpm_core::cell::CellType;
 use cpm_core::config::{ProposalMode, UserConfig};
