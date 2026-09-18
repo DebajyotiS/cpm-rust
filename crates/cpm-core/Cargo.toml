@@ -1,0 +1,36 @@
+[package]
+name = "cpm-core"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[features]
+checker = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+blake3 = { workspace = true }
+rand_core = { workspace = true }
+rand_xoshiro = { workspace = true }
+rand_distr = { workspace = true }
+rand = "0.8"
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "monte_carlo"
+harness = false
+
+[[bench]]
+name = "readouts"
+harness = false
+
+[[bench]]
+name = "scale"
+harness = false
+
+[[bench]]
+name = "topology"
+harness = false
