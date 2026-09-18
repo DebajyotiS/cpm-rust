@@ -1,7 +1,7 @@
 name: Slow correctness tests
 
 # The brute-force bookkeeping checker and the exact-Boltzmann validation tests
-# catche silent incremental-bookkeeping drift), but they run >10 minutes.
+# exist to catch silent incremental-bookkeeping drift, but they run >10 minutes.
 #
 #   - nightly, as a standing correctness net
 #   - on every push to main, so a bad merge is caught immediately rather than
@@ -9,6 +9,15 @@ name: Slow correctness tests
 #   - on any pull request that touches a correctness-critical module, so the
 #     one class of bug this checker exists to catch can't land silently
 #   - on demand, via workflow_dispatch
+#
+# The `paths` filter below only tells us a listed file changed, not what kind
+# of change it was. The `changed-correctness-code` job narrows that further:
+# it inspects the actual diff and skips the two slow jobs if every changed
+# line in those files is blank or a `//`/`///`/`//!` comment — a docstring or
+# comment edit shouldn't cost 12 minutes of CI. Anything it can't confidently
+# classify as comment-only (including a `/* */` block comment) falls through
+# to "run the tests" — safe by default, since this workflow's whole purpose
+# is to catch the failure mode we care most about not missing.
 on:
   schedule:
     - cron: "0 3 * * *" # 03:00 UTC daily
@@ -35,7 +44,53 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changed-correctness-code:
+    runs-on: ubuntu-latest
+    outputs:
+      run_slow_tests: ${{ steps.check.outputs.run_slow_tests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        name: Decide whether the diff touches actual code, not just comments
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run_slow_tests=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          files=(
+            crates/cpm-core/src/energy.rs
+            crates/cpm-core/src/dynamics.rs
+            crates/cpm-core/src/connectivity.rs
+            crates/cpm-core/src/simple_point.rs
+            crates/cpm-core/src/monte_carlo.rs
+            crates/cpm-core/src/state.rs
+            crates/cpm-core/src/theta.rs
+            crates/cpm-core/src/checker.rs
+            crates/cpm-core/src/edge_list.rs
+          )
+
+          run_slow_tests=false
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || continue
+            if git diff -U0 "$base" "$head" -- "$f" \
+                 | grep -E '^[+-][^+-]' \
+                 | sed -E 's/^[+-]//' \
+                 | grep -Ev '^\s*(//.*)?$' \
+                 | grep -q .; then
+              echo "$f has a non-comment change"
+              run_slow_tests=true
+            fi
+          done
+          echo "run_slow_tests=$run_slow_tests" >> "$GITHUB_OUTPUT"
+
   brute-force-checker:
+    needs: changed-correctness-code
+    if: needs.changed-correctness-code.outputs.run_slow_tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -46,6 +101,8 @@ jobs:
         run: cargo test -p cpm-core --release --features checker -- --ignored
 
   exact-boltzmann:
+    needs: changed-correctness-code
+    if: needs.changed-correctness-code.outputs.run_slow_tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
