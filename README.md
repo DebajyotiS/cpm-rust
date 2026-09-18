@@ -9,7 +9,7 @@
  ╚═════╝╚═╝     ╚═╝     ╚═╝      ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝
 ```
 
-![Rust](https://img.shields.io/badge/rust-1.80%2B-orange?logo=rust&logoColor=white)
+![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
@@ -112,8 +112,8 @@ Dimensionality is inferred from the shape of the `grid` argument passed during i
 
 ## Installation & Setup
 
-Requires Rust (edition 2021, MSRV 1.80) and Python >= 3.9. There is no published
-wheel yet, so `cpm` is only available by building from source — pre-built wheel
+Requires Rust (edition 2021, MSRV 1.85) and Python >= 3.9. There is no published
+wheel yet, so `cpm` is only available by building from source. A pre-built wheel
 distribution is on the roadmap.
 
 ### Working in this repo
