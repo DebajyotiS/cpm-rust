@@ -13,7 +13,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-A Cellular Potts Model (CPM) simulator for organoid tissue. The computational core (`cpm-core`) is pure Rust and generic over 2D and 3D spatial dimensions from a single implementation. Python bindings (`cpm-py`) expose the engine through a user-facing Python package (`python/cpm`).
+A Cellular Potts Model (CPM) simulator for organoids. The computational core (`cpm-core`) is pure Rust and generic over 2D and 3D spatial dimensions from a single implementation. Python bindings (`cpm-py`) expose the engine through a user-facing Python package (`python/cpm`).
 
 The simulator serves as a forward model for simulation-based inference (TMNRE) on organoid imaging data:
 
