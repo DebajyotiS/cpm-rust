@@ -6,6 +6,7 @@
 //! actionable message rather than a specific exception hierarchy, every one
 //! maps to the same `PyValueError`.
 
+use cpm_core::batch::BatchError;
 use cpm_core::cell::CellTypeError;
 use cpm_core::config::ConfigError;
 use cpm_core::initialization::InitError;
@@ -22,4 +23,11 @@ pub fn cell_type_err(e: CellTypeError) -> PyErr {
 
 pub fn init_err(e: InitError) -> PyErr {
     PyValueError::new_err(e.0)
+}
+
+/// `BatchError` isn't a `String` newtype like the other three (it's an enum
+/// covering config errors, init errors, and a mismatched theta length), so
+/// this goes through its `Display` impl rather than unwrapping a `.0` field.
+pub fn batch_err(e: BatchError) -> PyErr {
+    PyValueError::new_err(e.to_string())
 }

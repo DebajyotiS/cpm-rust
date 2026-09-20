@@ -125,3 +125,58 @@ class CPM:
                 stacklevel=2,
             )
         return result
+
+    def theta_names(self) -> list[str]:
+        """The canonical `theta` parameter names, in the order every `theta`
+        vector this simulation accepts must use. Requires
+        `register_cell_type`/`set_adhesion` to already be called; everything
+        `theta` covers comes from cell-type and adhesion structure, not from
+        `burn_in_mcs`/`readout_mcs`/`sampling_interval_mcs`, which don't need
+        to be set yet to call this."""
+        return self._raw.theta_names()
+
+    def extract_theta(self) -> list[float]:
+        """The current configuration's `theta`, in canonical order — a
+        starting point to perturb before calling `run_batch`."""
+        return self._raw.extract_theta()
+
+    def run_batch(
+        self,
+        thetas: Any,
+        burn_in_mcs: int,
+        readout_mcs: int,
+        sampling_interval_mcs: int,
+        master_seed: int,
+        include_lattice: bool = False,
+    ) -> list[Any]:
+        """Runs one independent trajectory per entry in `thetas`, in
+        parallel across available CPU cores (Rayon, with the GIL released
+        for the whole batch). Each simulation's seed is derived
+        deterministically from `(master_seed, index)`, so the results are
+        reproducible regardless of how the work happens to get scheduled
+        across threads.
+
+        Returns a list of `RunResult`, one per theta, in the same order as
+        `thetas`. At most one `CPMInitializationWarning` fires for the whole
+        call if any simulation used default placement — not one per
+        simulation, since a training-set-sized batch would otherwise be
+        unusably noisy."""
+        thetas_list = [list(theta) for theta in thetas]
+        any_used_default, results = self._raw.run_batch(
+            thetas_list,
+            burn_in_mcs,
+            readout_mcs,
+            sampling_interval_mcs,
+            master_seed,
+            include_lattice,
+        )
+        if any_used_default and self._warn_on_default_init:
+            warnings.warn(
+                "default (scatter-and-grow) initial placement used in at "
+                "least one batch member; call initialize(lattice=...) for "
+                "an explicit placement, or "
+                "initialize(warn_on_default_init=False) to silence this",
+                CPMInitializationWarning,
+                stacklevel=2,
+            )
+        return results

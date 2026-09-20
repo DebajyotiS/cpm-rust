@@ -11,6 +11,7 @@
 //! Metropolis-Hastings validation mode, and full readouts with run metadata
 //! (`output.rs`).
 
+pub mod batch;
 pub mod cell;
 pub mod checker;
 pub mod config;

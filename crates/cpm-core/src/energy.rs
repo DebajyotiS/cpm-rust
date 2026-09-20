@@ -647,8 +647,7 @@ impl Terms {
         let mut interface_delta = 0.0;
         if let Some(t) = ctx.losing_type() {
             let i = ctx.state.interface[crate::state::index_of(ctx.losing_id)] as f64;
-            interface_delta +=
-                self.interface.term(t, i + delta_losing) - self.interface.term(t, i);
+            interface_delta += self.interface.term(t, i + delta_losing) - self.interface.term(t, i);
         }
         if let Some(t) = ctx.gaining_type() {
             let i = ctx.state.interface[crate::state::index_of(ctx.gaining_id)] as f64;
