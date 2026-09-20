@@ -22,7 +22,7 @@ if ! cargo fmt --all -- --check; then
   FAILED=1
 fi
 
-if ! cargo clippy --workspace --all-targets -- -D warnings; then
+if ! cargo clippy --workspace --all-targets --all-features -- -D warnings; then
   echo "cargo clippy failed. Fix the warnings above." >&2
   FAILED=1
 fi
