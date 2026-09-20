@@ -19,8 +19,73 @@ The simulator serves as a forward model for simulation-based inference (TMNRE) o
 
 $$\theta \longrightarrow \text{stochastic CPM dynamics} \longrightarrow y$$
 
-Here, $\theta$ is a vector of biophysical parameters (adhesion energies, volume/interface stiffnesses, etc), and $y$ is a vector of summary statistics compared against experimental images. Correctness and auditability take priority over speed or biological complexity. 
+Here, $\theta$ is a vector of biophysical parameters (adhesion energies, volume/interface stiffnesses, etc), and $y$ is a vector of summary statistics compared against experimental images. Correctness and auditability take priority over speed or biological complexity.
 
+## Example
+
+These are the actual simulated lattice, pixel-for-pixel, not a schematic, produced by `notebooks/2d_organoid_demo.ipynb` and `notebooks/3d_organoid_demo.ipynb`.
+
+**2D differential adhesion sorting.** Four cell types start scattered and self-organize under differential adhesion alone:
+
+![2D differential adhesion sorting: four cell types settling from a scattered initial state into sorted domains](assets/images/2d_sorting_demo.png)
+
+**3D organoid, cross-section.** The same dynamics generalize to 3D from the same Rust engine (dimensionality follows from the length of `grid`):
+
+![3D organoid cross-section through a settled tissue, colored by cell type](assets/images/3d_organoid_slice.png)
+
+See the notebooks for the full runs, including interactive 3D isosurface rendering and lumen-formation checks.
+
+## Quickstart
+
+```python
+import cpm
+
+# Initialize simulation grid
+sim = cpm.CPM(
+    grid=(30, 30),
+    boundary="periodic",
+    seed=1,
+    copy_neighborhood="von_neumann",
+    connectivity_neighborhood="von_neumann",
+)
+
+# Configure cell types and parameters
+sim.add_cell_type(
+    name="epithelial",
+    target_volume=50,
+    target_interface=75,
+    lambda_volume=10.0,
+    lambda_interface=2.0,
+)
+sim.add_cells(cell_type="epithelial", n=5)
+
+# Set symmetric contact energy matrix (index 0 is medium)
+sim.set_adhesion([[0.0, 5.0], [5.0, 2.0]])
+
+# Run simulation
+result = sim.run(burn_in_mcs=5000, readout_mcs=5000, sampling_interval_mcs=100)
+
+print(f"Density: {result.metadata.derived_phi}")
+print(f"Status: {result.status.kind}")
+
+# Access summary metrics from the last sample
+sample = result.samples[-1]
+print(sample.volume)
+print(sample.centroid)
+
+```
+
+Use `cpm.cells_for_density` to calculate cell count for a target packing density $\phi$:
+
+```python
+n_cells = cpm.cells_for_density(grid=(64, 64, 64), target_volume=1048, phi=0.8)
+
+```
+
+Need `cpm` installed first? See [Installation & Setup](#installation--setup) below. For the full list of configuration options and what you need to set to get an organoid, see [Configuration Reference](#configuration-reference).
+
+<details>
+<summary>Math & Mechanics</summary>
 
 ## Math & Mechanics
 
@@ -78,6 +143,11 @@ Where $\text{GM}$ is the geometric mean of per-site activity over the copy neigh
 
 Proposed copies are checked against simple-point connectivity for the losing cell using precomputed 2D and 3D lookup tables (Bertrand–Malandain topological numbers). Medium (cell ID `0`) is exempt from this check to allow lumen formation.
 
+</details>
+
+<details>
+<summary>Repository Structure</summary>
+
 ## Repository Structure
 
 ```
@@ -110,24 +180,100 @@ python/cpm/                User-facing Python package
 
 Dimensionality is inferred from the shape of the `grid` argument passed during initialization.
 
+</details>
+
+<details>
+<summary>Installation & Setup</summary>
+
 ## Installation & Setup
 
-Requires Rust (edition 2021, MSRV 1.85) and Python >= 3.9. There is no published
-wheel yet, so `cpm` is only available by building from source. A pre-built wheel
-distribution is on the roadmap.
+There is no published wheel yet, so `cpm` is only available by building from
+source. That needs a Rust toolchain (edition 2021, MSRV 1.85) in addition to
+Python, since `maturin` compiles the `cpm-py`/`cpm-core` extension as part of
+the install. The steps below assume none of that is set up yet.
 
-### Working in this repo
+### 1. Install a C linker (if you don't already have one)
+
+Rust needs a system linker to produce the compiled extension.
+
+* macOS: `xcode-select --install`
+* Debian/Ubuntu: `sudo apt install build-essential`
+* Fedora: `sudo dnf groupinstall "Development Tools"`
+* Windows: install the "Desktop development with C++" workload from the
+  Visual Studio Build Tools
+
+### 2. Install Rust
 
 ```bash
-# Create virtual environment and install dependencies
-uv sync
-
-# Build Rust bindings into the local environment
-maturin develop
-
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustc --version   # must be >= 1.85
 ```
 
-Rebuild with `maturin develop` when modifying Rust code in `crates/`. Changes to Python code under `python/cpm/` will apply immediately.
+Already have Rust? Just confirm the version is recent enough with `rustc
+--version`, and run `rustup update` if it's older than 1.85.
+
+### 3. Install `uv`
+
+This project uses [`uv`](https://docs.astral.sh/uv/) to manage the Python
+virtual environment and dependencies. It also fetches a matching Python
+interpreter for you, so a separate Python install isn't required.
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+(See [uv's install docs](https://docs.astral.sh/uv/getting-started/installation/)
+for Windows or other install methods.)
+
+### 4. Clone the repository
+
+```bash
+git clone https://github.com/DebajyotiS/cpm-rust.git cpm
+cd cpm
+```
+
+### 5. Install Python dependencies
+
+```bash
+uv sync
+```
+
+This creates a `.venv` in the repo and installs `numpy` plus the dev tools
+listed under `pyproject.toml`'s `dev` dependency group (`pytest`,
+`matplotlib`, `plotly`, etc.).
+
+### 6. Build the Rust extension into the environment
+
+```bash
+uv run --with maturin maturin develop --release
+```
+
+`maturin` isn't a project dependency (it's a build tool, not something `cpm`
+needs at runtime), so `--with maturin` pulls it in for this one command. This
+compiles `crates/cpm-py` (and its `crates/cpm-core` dependency) and installs
+the resulting extension as `python/cpm/_cpm`.
+
+Drop `--release` only while iterating on Rust code and rebuilding often: a
+debug build compiles faster but runs the Monte Carlo loop much slower. For
+anything beyond a quick edit-compile cycle, `--release` is worth the extra
+build time.
+
+### 7. Verify the install
+
+```bash
+uv run python -c "import cpm; print(cpm.CPM)"
+```
+
+If that prints the `CPM` class with no errors, the build worked. Head back up
+to [Quickstart](#quickstart) to run an actual simulation, or jump to
+[Testing & Benchmarks](#testing--benchmarks) to run the test suite instead.
+
+### Working in this repo afterwards
+
+Re-run `uv run --with maturin maturin develop --release` whenever you change
+code under `crates/`. Changes to Python code under `python/cpm/` apply
+immediately, with no rebuild step.
 
 ### Using `cpm` from another project
 
@@ -136,63 +282,121 @@ published crate, so building the extension needs this whole repo, not just the
 Python package directory. From another project's environment:
 
 ```bash
-pip install /path/to/cpm            # local checkout
-# or, once this repo has a remote:
-pip install git+<repo-url>
+pip install /path/to/cpm                         # local checkout
+pip install git+https://github.com/DebajyotiS/cpm-rust.git   # from the remote
 ```
 
-Either form requires a Rust toolchain on the machine running the install — `pip`
-invokes `maturin`, which compiles `cpm-py` (and its `cpm-core` dependency) from
-source via the `[tool.maturin]` config in `pyproject.toml`. There is no way to
-depend on just the compiled extension without either building it yourself or
-installing a wheel someone else built.
+Either form requires a Rust toolchain on the machine running the install.
+`pip` invokes `maturin`, which compiles `cpm-py` (and its `cpm-core`
+dependency) from source via the `[tool.maturin]` config in `pyproject.toml`.
+There is no way to depend on just the compiled extension without either
+building it yourself or installing a wheel someone else built.
 
-## Quickstart
+</details>
 
-```python
-import cpm
+<details>
+<summary>Configuration Reference</summary>
 
-# Initialize simulation grid
-sim = cpm.CPM(
-    grid=(30, 30),
-    boundary="periodic",
-    seed=1,
-    copy_neighborhood="von_neumann",
-    connectivity_neighborhood="von_neumann",
-)
+## Configuration Reference
 
-# Configure cell types and parameters
-sim.add_cell_type(
-    name="epithelial",
-    target_volume=50,
-    target_interface=75,
-    lambda_volume=10.0,
-    lambda_interface=2.0,
-)
-sim.add_cells(cell_type="epithelial", n=5)
+Everything a simulation can be configured with, grouped by where it's set.
+Dimensionality (2D vs 3D) is inferred entirely from the length of `grid`;
+there's no separate dimension argument anywhere in this API.
 
-# Set symmetric contact energy matrix (index 0 is medium)
-sim.set_adhesion([[0.0, 5.0], [5.0, 2.0]])
+### `cpm.CPM(...)`: one call, sets the lattice and Monte Carlo rules
 
-# Run simulation
-result = sim.run(burn_in_mcs=5000, readout_mcs=5000, sampling_interval_mcs=100)
+| Argument | Values | Default | Notes |
+|---|---|---|---|
+| `grid` | tuple of 2 or 3 ints | required | length 2 → 2D, length 3 → 3D |
+| `boundary` | `"periodic"` \| `"fixed"` | required, no default | affects results; never silently defaulted |
+| `seed` | int | required | drives the RNG |
+| `copy_neighborhood` | `"von_neumann"` \| `"moore"` \| `"eighteen"` \| `"twenty_six"` \| `"twenty_six_weighted"` | `"von_neumann"` | which neighbours a pixel-copy move can propose from |
+| `energy_neighborhood` | same set as above | `"moore"` in 2D, `"eighteen"` in 3D | used by the interface/adhesion terms; an unweighted 26-neighbour stencil in 3D causes cubic faceting, so `"eighteen"` is recommended over `"twenty_six"` there |
+| `connectivity_neighborhood` | same set as above | `"von_neumann"` | must be a superset of `copy_neighborhood` (checked at config time) |
+| `acceptance` | `"metropolis"` \| `"metropolis_hastings"` | `"metropolis"` | `"metropolis_hastings"` is for the dedicated MH validation mode, not general use |
+| `proposal` | `"uniform"` \| `"edge_list"` | `"uniform"` | `"edge_list"` only proposes moves at existing interfaces, which matters a lot at 3D organoid scale; incompatible with `acceptance="metropolis_hastings"` |
+| `active_terms` | dict with any of `"volume"`, `"interface"`, `"adhesion"`, `"act"` → bool | all `True` | toggles Hamiltonian terms off for debugging/ablation |
 
-print(f"Density: {result.metadata.derived_phi}")
-print(f"Status: {result.status.kind}")
+### `sim.add_cell_type(...)` / `sim.add_cells(...)`: cell types and population
 
-# Access summary metrics from the last sample
-sample = result.samples[-1]
-print(sample.volume)
-print(sample.centroid)
+| Argument | Meaning |
+|---|---|
+| `target_volume` (V\*), `target_interface` (I\*) | equilibrium targets; measure these per type/dimension rather than guessing (see the `calibrate-targets` workflow and `crates/cpm-core/examples/calibrate_targets.rs`) |
+| `lambda_volume`, `lambda_interface` | stiffness of each constraint |
+| `lambda_act`, `max_act` | optional Act migration term; `lambda_act=0.0` (the default) disables it |
+| `add_cells(cell_type, n)` | how many cells of that type to create; cell count never varies with `theta` |
 
-```
+### `sim.set_adhesion(matrix)`: contact energies
 
-Use `cpm.cells_for_density` to calculate cell count for a target packing density $\phi$:
+A symmetric `(n_types + 1) x (n_types + 1)` matrix, index `0` reserved for
+medium. Adhesion is per cell *ID*, not per type: two distinct cells of the
+same type still pay `J[type][type]` along their shared boundary.
 
-```python
-n_cells = cpm.cells_for_density(grid=(64, 64, 64), target_volume=1048, phi=0.8)
+### `sim.initialize(...)`: initial placement (optional)
 
-```
+* Omit it entirely and `run()` uses default scatter-and-grow placement,
+  which raises a `CPMInitializationWarning` (initial contact topology
+  affects how much burn-in is needed, so this default isn't silent about it).
+* Pass `lattice` (a flat cell-id array) and `cell_type_of` for an explicit
+  placement instead, for example the seeded-and-grown packing built in
+  `notebooks/3d_organoid_demo.ipynb`. The lattice must already satisfy
+  connectivity under `connectivity_neighborhood`.
+* Pass `warn_on_default_init=False` to silence the warning without supplying
+  an explicit placement.
+
+### `sim.run(...)`: executes the whole trajectory in one call
+
+| Argument | Meaning |
+|---|---|
+| `burn_in_mcs` | MCS run before readout starts (not sampled) |
+| `readout_mcs` | MCS run after burn-in, during which samples are taken |
+| `sampling_interval_mcs` | how often (in MCS) a sample is recorded during readout |
+| `include_lattice` | if `True`, also stores the full cell-id lattice per sample; off by default since it's a full grid-sized copy per sample |
+
+Nothing runs until `run()` is called, and it returns only after the entire
+trajectory finishes. There's no per-step callback into Python.
+
+### Reading `RunResult`
+
+* `result.metadata`: `derived_phi`, `seed`, `seed_policy`, `convention_hash`,
+  `model_hash`, `cpm_version`, `theta_layout_version`
+* `result.status`: `kind` (one of `"Ok"`, `"CellLost"`, `"Fragmented"`,
+  `"NotEquilibrated"`, `"Degenerate"`), plus `cell_id`/`at_mcs` when relevant
+* `result.samples[i]`: `mcs`, `conservative_energy`, `ids`, `volume`,
+  `interface`, `centroid`, `eigenvalues`, `radius_of_gyration_sq`,
+  `kappa_sq`, `contact` (dense, upper-triangular contact graph),
+  `fragmented_cells`, `medium_component_volumes`,
+  `medium_component_touches_boundary`, and `lattice` if
+  `include_lattice=True` was requested
+* `result.cell_type_index`, `result.cell_type_names`: map each cell ID to
+  its type, once per run
+
+### Helpers
+
+* `cpm.cells_for_density(grid, target_volume, phi)` inverts
+  $\phi = \sum V_c / N_{\text{sites}}$ for a cell count. Warns with
+  `CPMLowResolutionWarning` if the implied cell radius falls below ~5
+  lattice sites, where discretisation starts dominating shape readouts.
+
+### What you need to set to actually get an organoid
+
+1. `grid`, `boundary`, `seed` on the `CPM` constructor.
+2. One or more cell types with calibrated `target_volume`/`target_interface`
+   and chosen `lambda_volume`/`lambda_interface`.
+3. Cell counts: either `add_cells(n=...)` directly, or back it out from a
+   target packing density with `cells_for_density`.
+4. A symmetric adhesion matrix covering every type pair, including medium.
+5. `burn_in_mcs` long enough to grow/relax cells before the readout window
+   starts. This matters more than it sounds like it should; see the "gotcha"
+   in `notebooks/3d_organoid_demo.ipynb` about placing cells at full size.
+6. For 3D at organoid scale specifically: `energy_neighborhood="eighteen"`,
+   `proposal="edge_list"`, and usually an explicit `sim.initialize(...)`
+   placement (small, connected seeds) rather than the default scatter-and-grow.
+
+</details>
+
+<details>
+<summary>Testing & Benchmarks</summary>
 
 ## Testing & Benchmarks
 
@@ -207,32 +411,42 @@ cargo test -p cpm-core --features checker -- --ignored
 cargo bench
 
 # Run Python test suite
-maturin develop && pytest tests/python
+uv run --with maturin maturin develop --release && uv run pytest tests/python
 
 ```
 
 The `--features checker` flag recomputes global energy, volumes, and interface counts from scratch after every accepted move to catch incremental state drift.
+
+</details>
+
+<details>
+<summary>CI/CD</summary>
 
 ## CI/CD
 
 `.github/workflows/ci.yml` runs on every push and pull request: `cargo fmt --check`,
 `clippy -D warnings`, an MSRV check pinned to the `rust-version` in `Cargo.toml`,
 `cargo test -p cpm-core`/`-p cpm-py` (release, non-ignored), a compile-only check of
-the Criterion benches, and the `pytest` suite built via `maturin develop`. All of
-that finishes in well under a minute.
+the Criterion benches, and the `pytest` suite built via `maturin develop --release`.
+All of that finishes in well under a minute.
 
 The brute-force checker and the exact-Boltzmann validation tests are excluded from
-that workflow — measured end-to-end, `cargo test -p cpm-core --release --features
+that workflow. Measured end-to-end, `cargo test -p cpm-core --release --features
 checker -- --ignored` takes ~12 minutes, almost all of it the exact-Boltzmann
 enumeration, which is far too slow to gate every push. `.github/workflows/slow-tests.yml`
 runs them instead: nightly on a schedule, on every push to `main`, on demand via
-`workflow_dispatch`, and — because these are the tests that catch silent
-incremental-bookkeeping drift, the project's own highest-priority failure mode — on
+`workflow_dispatch`, and, because these are the tests that catch silent
+incremental-bookkeeping drift (the project's own highest-priority failure mode), on
 any pull request that touches a correctness-critical module (`energy.rs`,
 `dynamics.rs`, `connectivity.rs`, `simple_point.rs`, `monte_carlo.rs`, `state.rs`,
 `theta.rs`, `checker.rs`, `edge_list.rs`). A PR that only touches the Python layer or
 docs never pays the 12-minute cost; one that touches the Hamiltonian or the Monte
 Carlo loop pays it before merge, not just at the next nightly run.
+
+</details>
+
+<details>
+<summary>Frequently Asked Questions</summary>
 
 ## Frequently Asked Questions
 
@@ -251,8 +465,15 @@ Unweighted 26-neighbor stencils in 3D introduce significant grid anisotropy, cau
 **Why do cells of the same type pay non-zero contact energy?**
 Adhesion energies are calculated per cell ID rather than per cell type. Two separate cells of the same type still pay contact energy $J[\alpha][\alpha]$ along their shared boundary.
 
+</details>
+
+<details>
+<summary>Guidelines</summary>
+
 ## Guidelines
 
 * Keep `cpm-core` completely free of PyO3 dependencies; binding logic belongs exclusively in `cpm-py`.
 * Ensure energy values remain `f64` throughout computations.
 * Avoid Python callbacks or per-step FFI calls inside the Monte Carlo execution loop.
+
+</details>
