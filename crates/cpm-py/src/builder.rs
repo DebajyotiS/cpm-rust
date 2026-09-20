@@ -407,12 +407,20 @@ impl Simulation {
 /// only read `cell_types`/`adhesion`, so placeholder window values stand in
 /// here rather than asking the caller for real ones just to ask what
 /// `theta` looks like.
+///
+/// `UserConfig::resolve` fills required fields but does not validate them —
+/// `theta::extract`/`theta::names` index the adhesion matrix by cell-type
+/// count and panic on a malformed (short-row or undersized) matrix instead
+/// of raising. Validate here so a bad shape surfaces as the promised
+/// `ValueError`.
 fn resolve_for_theta<const D: usize>(cfg: &UserConfig<D>) -> PyResult<ResolvedConfig<D>> {
     let mut cfg = cfg.clone();
     cfg.burn_in_mcs = Some(cfg.burn_in_mcs.unwrap_or(1));
     cfg.readout_mcs = Some(cfg.readout_mcs.unwrap_or(1));
     cfg.sampling_interval_mcs = Some(cfg.sampling_interval_mcs.unwrap_or(1));
-    cfg.resolve().map_err(config_err)
+    let resolved = cfg.resolve().map_err(config_err)?;
+    resolved.validate().map_err(config_err)?;
+    Ok(resolved)
 }
 
 /// `UserConfig<D>::resolve` requires `burn_in_mcs`/`readout_mcs`/
