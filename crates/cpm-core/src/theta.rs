@@ -11,6 +11,17 @@
 
 use crate::config::ResolvedConfig;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThetaError(pub String);
+
+impl std::fmt::Display for ThetaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for ThetaError {}
+
 /// Bumped whenever the layout itself changes (field order, inclusion, or
 /// encoding) — independent of `n_types`, which changes the vector's length
 /// but not its meaning. Belongs in run metadata alongside `convention_hash`;
@@ -72,8 +83,17 @@ pub fn extract<const D: usize>(config: &ResolvedConfig<D>) -> Vec<f64> {
 /// `convention_hash` untouched too, since none of those fields feed it.
 ///
 /// `Max_Act` is stored as `u32` on [`crate::cell::CellType`] but travels
-/// through `theta` as `f64`; injection rounds to the nearest integer.
-pub fn inject<const D: usize>(config: &mut ResolvedConfig<D>, theta: &[f64]) {
+/// through `theta` as `f64`; injection rounds to the nearest integer. Rust's
+/// `f64 -> u32` cast *saturates* rather than erroring, so an out-of-range
+/// value (negative, NaN, or above `u32::MAX`) would otherwise be silently
+/// remapped to a different, valid `Max_Act` instead of being rejected —
+/// which corrupts the theta-to-simulation mapping without a visible error.
+/// `Max_Act` values are validated before anything is mutated, so a rejected
+/// `theta` leaves `config` unchanged.
+pub fn inject<const D: usize>(
+    config: &mut ResolvedConfig<D>,
+    theta: &[f64],
+) -> Result<(), ThetaError> {
     let n = config.cell_types.len();
     assert_eq!(
         theta.len(),
@@ -82,6 +102,20 @@ pub fn inject<const D: usize>(config: &mut ResolvedConfig<D>, theta: &[f64]) {
         theta.len(),
         theta_len(n)
     );
+
+    let max_act_start = theta.len() - n;
+    for (i, t) in config.cell_types.iter().enumerate() {
+        let value = theta[max_act_start + i];
+        let rounded = value.round();
+        if !rounded.is_finite() || rounded < 0.0 || rounded > u32::MAX as f64 {
+            return Err(ThetaError(format!(
+                "max_act[{}] = {value} does not round to a value representable as u32 \
+                 (must be finite and within [0, {}])",
+                t.name,
+                u32::MAX
+            )));
+        }
+    }
 
     let mut cursor = 0usize;
     for t in &mut config.cell_types {
@@ -109,6 +143,7 @@ pub fn inject<const D: usize>(config: &mut ResolvedConfig<D>, theta: &[f64]) {
         cursor += 1;
     }
     debug_assert_eq!(cursor, theta.len());
+    Ok(())
 }
 
 /// Human-readable names in the same order as [`extract`], using declared
@@ -165,7 +200,7 @@ mod tests {
 
         let theta = extract(&config);
         let perturbed: Vec<f64> = theta.iter().map(|v| v + 1.0).collect();
-        inject(&mut config, &perturbed);
+        inject(&mut config, &perturbed).unwrap();
         let recovered = extract(&config);
 
         assert_eq!(perturbed, recovered);
@@ -183,12 +218,51 @@ mod tests {
         // adhesion entry and confirm both triangle halves move together.
         let adhesion_start = config.cell_types.len() * 2;
         theta[adhesion_start] += 5.0;
-        inject(&mut config, &theta);
+        inject(&mut config, &theta).unwrap();
         for i in 0..config.adhesion.len() {
             for j in 0..config.adhesion.len() {
                 assert_eq!(config.adhesion[i][j], config.adhesion[j][i]);
             }
         }
+    }
+
+    /// A negative `Max_Act` entry must be rejected rather than silently
+    /// saturating to `0` on the `f64 -> u32` cast — two different thetas
+    /// (e.g. -1.0 and 0.0) must not map to the same simulation.
+    #[test]
+    fn negative_max_act_is_rejected_not_saturated() {
+        let mut config = two_type_config();
+        let mut theta = extract(&config);
+        let max_act_start = theta.len() - config.cell_types.len();
+        theta[max_act_start] = -1.0;
+        let err = inject(&mut config, &theta).unwrap_err();
+        assert!(err.0.contains("max_act"));
+    }
+
+    #[test]
+    fn non_finite_max_act_is_rejected() {
+        let mut config = two_type_config();
+        let mut theta = extract(&config);
+        let max_act_start = theta.len() - config.cell_types.len();
+        theta[max_act_start] = f64::NAN;
+        assert!(inject(&mut config, &theta).is_err());
+    }
+
+    /// A rejected `theta` must leave `config` untouched — injection is
+    /// atomic, not partially applied up to the point of failure.
+    #[test]
+    fn rejected_injection_leaves_config_unchanged() {
+        let mut config = two_type_config();
+        let before = config.clone();
+        let mut theta = extract(&config);
+        for v in theta.iter_mut() {
+            *v += 1.0;
+        }
+        let max_act_start = theta.len() - config.cell_types.len();
+        theta[max_act_start] = -1.0;
+        assert!(inject(&mut config, &theta).is_err());
+        assert_eq!(config.cell_types, before.cell_types);
+        assert_eq!(config.adhesion, before.adhesion);
     }
 
     #[test]
