@@ -3,9 +3,8 @@ target_volume, phi)`, inverting `phi = sum(V_c) / N_sites`."""
 
 import warnings
 
-import pytest
-
 import cpm
+import pytest
 from cpm.warnings import CPMLowResolutionWarning
 
 
@@ -27,6 +26,4 @@ def test_does_not_warn_above_the_radius_floor():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         cpm.cells_for_density(grid=(64, 64), target_volume=1000, phi=0.8)
-        assert not any(
-            issubclass(w.category, CPMLowResolutionWarning) for w in caught
-        )
+        assert not any(issubclass(w.category, CPMLowResolutionWarning) for w in caught)

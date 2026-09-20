@@ -33,6 +33,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff format --check python/ tests/python/ notebooks/*.ipynb
+      - run: uv run ruff check python/ tests/python/ notebooks/*.ipynb
+
   msrv:
     runs-on: ubuntu-latest
     steps:

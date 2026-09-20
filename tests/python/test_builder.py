@@ -2,10 +2,9 @@
 `CPM(...)` -> `register_cell_type` -> `add_cells` -> `set_adhesion` -> `run`.
 """
 
+import cpm
 import numpy as np
 import pytest
-
-import cpm
 from cpm.warnings import CPMInitializationWarning
 
 
@@ -81,11 +80,17 @@ def test_include_lattice_defaults_to_none_and_can_be_requested():
 def test_two_cell_types_are_labelled_correctly():
     sim = cpm.CPM(grid=(30, 30), boundary="periodic", seed=3)
     sim.register_cell_type(
-        name="epithelial", target_volume=30, target_interface=60, lambda_volume=1.0,
+        name="epithelial",
+        target_volume=30,
+        target_interface=60,
+        lambda_volume=1.0,
         lambda_interface=1.0,
     )
     sim.register_cell_type(
-        name="stem", target_volume=30, target_interface=60, lambda_volume=1.0,
+        name="stem",
+        target_volume=30,
+        target_interface=60,
+        lambda_volume=1.0,
         lambda_interface=1.0,
     )
     sim.add_cells(cell_type="epithelial", n=3)

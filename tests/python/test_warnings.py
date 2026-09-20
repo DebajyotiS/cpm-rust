@@ -1,8 +1,7 @@
 import warnings
 
-import pytest
-
 import cpm
+import pytest
 from cpm.warnings import CPMInitializationWarning
 
 
@@ -12,13 +11,13 @@ def test_is_a_user_warning():
 
 def test_can_be_raised_and_caught():
     with pytest.warns(CPMInitializationWarning):
-        warnings.warn("default initialisation used", CPMInitializationWarning)
+        warnings.warn("default initialisation used", CPMInitializationWarning, stacklevel=2)
 
 
 def test_suppressible_via_simplefilter():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("ignore", CPMInitializationWarning)
-        warnings.warn("default initialisation used", CPMInitializationWarning)
+        warnings.warn("default initialisation used", CPMInitializationWarning, stacklevel=2)
         assert len(caught) == 0
 
 
@@ -44,9 +43,7 @@ def test_warn_on_default_init_false_suppresses_it():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         sim.run(burn_in_mcs=1, readout_mcs=1, sampling_interval_mcs=1)
-        assert not any(
-            issubclass(w.category, CPMInitializationWarning) for w in caught
-        )
+        assert not any(issubclass(w.category, CPMInitializationWarning) for w in caught)
 
 
 def test_explicit_placement_never_warns_regardless_of_the_flag():
@@ -61,6 +58,4 @@ def test_explicit_placement_never_warns_regardless_of_the_flag():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         sim.run(burn_in_mcs=0, readout_mcs=1, sampling_interval_mcs=1)
-        assert not any(
-            issubclass(w.category, CPMInitializationWarning) for w in caught
-        )
+        assert not any(issubclass(w.category, CPMInitializationWarning) for w in caught)

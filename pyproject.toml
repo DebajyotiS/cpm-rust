@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "cpm"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cellular Potts Model tissue simulator (Rust core, Python bindings)"
 requires-python = ">=3.9"
 dependencies = ["numpy"]
@@ -13,9 +13,11 @@ dependencies = ["numpy"]
 dev = [
     "ipykernel>=6.31.0",
     "matplotlib>=3.9.4",
+    "nbclient>=0.10.0",
     "nbformat>=5.10.0",
     "plotly>=5.24.0",
     "pytest>=8.0",
+    "ruff>=0.6",
 ]
 
 [tool.maturin]
@@ -23,3 +25,10 @@ manifest-path = "crates/cpm-py/Cargo.toml"
 python-source = "python"
 module-name = "cpm._cpm"
 features = ["extension-module"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

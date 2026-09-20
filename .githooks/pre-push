@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Local pre-push gate: formatting and lint for both languages, mirroring what
+# CI checks first.
+#
+# Runs cargo fmt --check and cargo clippy for Rust, ruff format --check and
+# ruff check for Python (including the notebooks — ruff understands .ipynb
+# natively). Deliberately doesn't run either test suite — that's covered by
+# CI once the push lands, and keeping this fast means it won't be the thing
+# people reach for --no-verify to skip.
+#
+# One-time setup per clone:
+#   git config core.hooksPath .githooks
+
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+FAILED=0
+
+if ! cargo fmt --all -- --check; then
+  echo "cargo fmt --check failed. Run 'cargo fmt --all' and re-stage." >&2
+  FAILED=1
+fi
+
+if ! cargo clippy --workspace --all-targets -- -D warnings; then
+  echo "cargo clippy failed. Fix the warnings above." >&2
+  FAILED=1
+fi
+
+if ! uv run ruff format --check python/ tests/python/ notebooks/*.ipynb; then
+  echo "ruff format --check failed. Run 'uv run ruff format ...' and re-stage." >&2
+  FAILED=1
+fi
+
+if ! uv run ruff check python/ tests/python/ notebooks/*.ipynb; then
+  echo "ruff check failed. Fix the issues above (some are 'uv run ruff check --fix'-able)." >&2
+  FAILED=1
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "" >&2
+  echo "Pre-push check failed. Fix the issues above, or, if you're certain" >&2
+  echo "this push should go through anyway, use 'git push --no-verify'." >&2
+  exit 1
+fi
+
+exit 0
