@@ -407,6 +407,9 @@ cargo test -p cpm-core
 # Run brute-force consistency checker (recomputes state every move)
 cargo test -p cpm-core --features checker -- --ignored
 
+# Run the fused conservative-delta hot path (opt-in, see caveat below)
+cargo test -p cpm-core --features fused-energy
+
 # Run benchmarks
 cargo bench
 
@@ -416,6 +419,8 @@ uv run --with maturin maturin develop --release && uv run pytest tests/python
 ```
 
 The `--features checker` flag recomputes global energy, volumes, and interface counts from scratch after every accepted move to catch incremental state drift.
+
+The `--features fused-energy` flag switches `cpm-core` to a single-pass computation of the interface and adhesion terms, and reuses the interface delta computed while pricing a move instead of recomputing it when the move is accepted. It's verified bit-identical to the default path — the frozen-trajectory regression test, the brute-force checker, and the exact-Boltzmann validation all pass unchanged under it. It is **not** the default, though: benchmarked at inference-scale confluent density, it shows no statistically significant throughput improvement over the default path in most cases, and one small-grid benchmark regressed. It's kept as correct, tested, opt-in infrastructure rather than switched on by default.
 
 </details>
 

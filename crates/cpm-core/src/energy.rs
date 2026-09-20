@@ -565,6 +565,387 @@ impl Terms {
     }
 }
 
+/// Result of [`Terms::fused_conservative_delta`]: the scalar conservative ΔH
+/// alongside the raw interface `(delta_losing, delta_gaining)` pair, so a
+/// caller pricing a move can hand that pair straight to `commit_accepted`
+/// when the move is accepted.
+#[cfg(feature = "fused-energy")]
+pub struct ConservativeDelta {
+    pub total: f64,
+    pub interface_deltas: (f64, f64),
+}
+
+#[cfg(feature = "fused-energy")]
+impl Terms {
+    /// Prices a move by walking the energy neighbourhood once, reading each
+    /// neighbour's cell id and type a single time and feeding it into the
+    /// interface and adhesion accumulators together, where
+    /// `InterfaceTerm::delta` and `AdhesionTerm::delta` each walk the same
+    /// neighbourhood on their own.
+    ///
+    /// `delta_losing`, `delta_gaining` and `adhesion_total` are kept as three
+    /// separate running sums, each accumulated in the same neighbour order
+    /// their non-fused counterparts use. Floating-point addition isn't
+    /// associative, so keeping the sums apart (fusing only the neighbour
+    /// reads) is what makes this produce the exact same result as pricing
+    /// the terms separately — `fused_tests` below checks that directly.
+    pub fn fused_conservative_delta<const D: usize>(
+        &self,
+        ctx: &CopyContext<D>,
+    ) -> ConservativeDelta {
+        let volume_delta = self.volume.delta(ctx);
+
+        debug_assert_eq!(
+            self.interface.offsets, self.adhesion.offsets,
+            "interface and adhesion must share the energy neighbourhood"
+        );
+        debug_assert_eq!(
+            self.interface.weights, self.adhesion.weights,
+            "interface and adhesion must share the energy neighbourhood weights"
+        );
+        let offsets = &self.interface.offsets;
+        let weights = &self.interface.weights;
+
+        let losing_adhesion_idx = adhesion_index(ctx.losing_type());
+        let gaining_adhesion_idx = adhesion_index(ctx.gaining_type());
+
+        let mut delta_losing = 0.0;
+        let mut delta_gaining = 0.0;
+        let mut adhesion_total = 0.0;
+        for (k, &offset) in offsets.iter().enumerate() {
+            let w = weights[k];
+            let neighbour_flat = ctx.lattice.neighbour(ctx.target_flat, offset);
+            let neighbour_cell = ctx.lattice.get(neighbour_flat);
+
+            // Same condition, same order as InterfaceTerm::interface_deltas.
+            delta_losing += if neighbour_cell == ctx.losing_id {
+                w
+            } else {
+                -w
+            };
+            delta_gaining += if neighbour_cell == ctx.gaining_id {
+                -w
+            } else {
+                w
+            };
+
+            // Same condition, same order as AdhesionTerm::delta.
+            let neighbour_adhesion_idx = adhesion_index(ctx.state.type_of(neighbour_cell));
+            let before = if neighbour_cell != ctx.losing_id {
+                self.adhesion.adhesion[losing_adhesion_idx][neighbour_adhesion_idx]
+            } else {
+                0.0
+            };
+            let after = if neighbour_cell != ctx.gaining_id {
+                self.adhesion.adhesion[gaining_adhesion_idx][neighbour_adhesion_idx]
+            } else {
+                0.0
+            };
+            adhesion_total += w * (after - before);
+        }
+
+        let mut interface_delta = 0.0;
+        if let Some(t) = ctx.losing_type() {
+            let i = ctx.state.interface[crate::state::index_of(ctx.losing_id)] as f64;
+            interface_delta +=
+                self.interface.term(t, i + delta_losing) - self.interface.term(t, i);
+        }
+        if let Some(t) = ctx.gaining_type() {
+            let i = ctx.state.interface[crate::state::index_of(ctx.gaining_id)] as f64;
+            interface_delta +=
+                self.interface.term(t, i + delta_gaining) - self.interface.term(t, i);
+        }
+
+        ConservativeDelta {
+            // Same left-to-right order as `Terms::total_delta`'s
+            // `volume.delta + interface.delta + adhesion.delta`.
+            total: volume_delta + interface_delta + adhesion_total,
+            interface_deltas: (delta_losing, delta_gaining),
+        }
+    }
+}
+
+/// Cross-checks `fused_conservative_delta` against pricing the terms
+/// separately, on a two-cell fixture with a real, nonzero interface and
+/// adhesion delta.
+#[cfg(all(test, feature = "fused-energy"))]
+mod fused_tests {
+    use super::*;
+    use crate::cell::{Cell, CellType};
+    use crate::config::UserConfig;
+    use crate::lattice::Boundary;
+    use crate::model::CPM;
+
+    fn two_type_config(seed: u64) -> crate::config::ResolvedConfig<2> {
+        UserConfig::<2> {
+            grid: Some([10, 10]),
+            boundary: Some(Boundary::Periodic),
+            cell_types: vec![
+                CellType {
+                    name: "a".into(),
+                    target_volume: 9,
+                    target_interface: 20,
+                    lambda_volume: 1.0,
+                    lambda_interface: 0.3,
+                    lambda_act: 0.0,
+                    max_act: 0,
+                },
+                CellType {
+                    name: "b".into(),
+                    target_volume: 9,
+                    target_interface: 20,
+                    lambda_volume: 1.5,
+                    lambda_interface: 0.4,
+                    lambda_act: 0.0,
+                    max_act: 0,
+                },
+            ],
+            cell_counts: vec![1, 1],
+            adhesion: Some(vec![
+                vec![0.0, 2.0, 3.0],
+                vec![2.0, 1.0, 4.0],
+                vec![3.0, 4.0, 1.5],
+            ]),
+            burn_in_mcs: Some(0),
+            readout_mcs: Some(1),
+            sampling_interval_mcs: Some(1),
+            seed: Some(seed),
+            ..Default::default()
+        }
+        .resolve()
+        .unwrap()
+    }
+
+    /// Two 3x3 blocks side by side, with interface counts recomputed from
+    /// scratch so the fixture carries a real, nonzero interface state
+    /// rather than the all-zero one `CPM::new` starts with.
+    fn place_two_blocks(cpm: &mut CPM<2>) {
+        cpm.state.cells = vec![
+            Cell {
+                id: 1,
+                type_index: 0,
+            },
+            Cell {
+                id: 2,
+                type_index: 1,
+            },
+        ];
+        cpm.state.volume = vec![0, 0];
+        for x in 1..4 {
+            for y in 1..4 {
+                let flat = cpm.state.lattice.flat_index([x, y]);
+                cpm.state.lattice.set(flat, 1);
+                cpm.state.volume[0] += 1;
+            }
+        }
+        for x in 4..7 {
+            for y in 1..4 {
+                let flat = cpm.state.lattice.flat_index([x, y]);
+                cpm.state.lattice.set(flat, 2);
+                cpm.state.volume[1] += 1;
+            }
+        }
+        let mut interface = vec![0u32; 2];
+        cpm.state.lattice.each_interior_coord(|coord| {
+            let flat = cpm.state.lattice.flat_index(coord);
+            let cell = cpm.state.lattice.get(flat);
+            if cell == 0 {
+                return;
+            }
+            for &offset in &cpm.energy_offsets {
+                let neighbour = cpm
+                    .state
+                    .lattice
+                    .get(cpm.state.lattice.neighbour(flat, offset));
+                if neighbour != cell {
+                    interface[crate::state::index_of(cell)] += 1;
+                }
+            }
+        });
+        cpm.state.interface = interface;
+    }
+
+    fn ctx_at(cpm: &CPM<2>, target: [usize; 2], source: [usize; 2]) -> CopyContext<'_, 2> {
+        let target_flat = cpm.state.lattice.flat_index(target);
+        let source_flat = cpm.state.lattice.flat_index(source);
+        CopyContext {
+            lattice: &cpm.state.lattice,
+            state: &cpm.state,
+            target_flat,
+            source_flat,
+            losing_id: cpm.state.lattice.get(target_flat),
+            gaining_id: cpm.state.lattice.get(source_flat),
+            mcs: 0,
+        }
+    }
+
+    fn assert_matches_sequential(cpm: &CPM<2>, ctx: &CopyContext<'_, 2>) {
+        let sequential_total = cpm.terms.total_delta(ctx);
+        let sequential_pair = cpm.terms.interface.interface_deltas(ctx);
+        let fused = cpm.terms.fused_conservative_delta(ctx);
+        assert_eq!(
+            fused.total, sequential_total,
+            "fused total must match total_delta exactly"
+        );
+        assert_eq!(
+            fused.interface_deltas, sequential_pair,
+            "fused interface pair must match interface_deltas exactly"
+        );
+    }
+
+    #[test]
+    fn fused_matches_sequential_on_a_hand_built_boundary_move() {
+        let mut cpm = CPM::new(two_type_config(1)).unwrap();
+        place_two_blocks(&mut cpm);
+        // (3,2) is cell 1's rightmost column, adjacent to cell 2 at (4,2).
+        let ctx = ctx_at(&cpm, [3, 2], [4, 2]);
+        assert_matches_sequential(&cpm, &ctx);
+    }
+
+    #[test]
+    fn fused_matches_sequential_across_random_boundary_moves() {
+        use rand::Rng as _;
+        let mut cpm = CPM::new(two_type_config(2)).unwrap();
+        place_two_blocks(&mut cpm);
+        let mut rng = crate::rng::rng_from_seed(99);
+
+        // Every site along the shared boundary, proposed in both
+        // directions.
+        let candidates: [([usize; 2], [usize; 2]); 6] = [
+            ([3, 1], [4, 1]),
+            ([3, 2], [4, 2]),
+            ([3, 3], [4, 3]),
+            ([4, 1], [3, 1]),
+            ([4, 2], [3, 2]),
+            ([4, 3], [3, 3]),
+        ];
+
+        for _ in 0..200 {
+            let (target, source) = candidates[rng.gen_range(0..candidates.len())];
+            let ctx = ctx_at(&cpm, target, source);
+            assert_matches_sequential(&cpm, &ctx);
+        }
+    }
+
+    /// Isolated pricing-cost comparison, same methodology and fixture as
+    /// `monte_carlo::tests::diag_total_delta_vs_commit_cost_3d`: harvest
+    /// real, non-null, connectivity-passing proposals from a relaxed
+    /// confluent 3D fixture, then time `total_delta` and
+    /// `fused_conservative_delta` over the same harvested set. Manual
+    /// `Instant` timing rather than Criterion, for the same reason as the
+    /// existing diagnostic — `pub(crate)` internals this needs aren't
+    /// reachable from an external bench crate. Run with `--release --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore = "diagnostic only: run with --release -- --ignored --nocapture"]
+    fn diag_fused_vs_sequential_pricing_cost_3d() {
+        use crate::config::UserConfig;
+        use crate::connectivity::preserves_topology;
+        use crate::lattice::Boundary;
+        use rand::Rng as _;
+        use std::time::Instant;
+
+        let config = UserConfig::<3> {
+            grid: Some([40, 40, 40]),
+            boundary: Some(Boundary::Fixed),
+            cell_types: vec![CellType {
+                name: "a".into(),
+                target_volume: 125,
+                target_interface: 250,
+                lambda_volume: 1.0,
+                lambda_interface: 0.2,
+                lambda_act: 0.0,
+                max_act: 0,
+            }],
+            cell_counts: vec![150],
+            adhesion: Some(vec![vec![0.0, 3.0], vec![3.0, 1.0]]),
+            burn_in_mcs: Some(0),
+            readout_mcs: Some(1),
+            sampling_interval_mcs: Some(1),
+            seed: Some(1),
+            ..Default::default()
+        }
+        .resolve()
+        .unwrap();
+        let mut cpm = CPM::new(config).unwrap();
+        crate::initialization::initialize(&mut cpm).expect("fixture must initialise");
+        crate::monte_carlo::run_mcs(&mut cpm, 5);
+
+        let mut rng = crate::rng::rng_from_seed(2);
+        let dims = cpm.state.lattice.dims();
+        let mut proposals = Vec::new();
+        while proposals.len() < 5_000 {
+            let target_coord: [usize; 3] = std::array::from_fn(|d| rng.gen_range(0..dims[d]));
+            let target_flat = cpm.state.lattice.flat_index(target_coord);
+            let source_offset = cpm.copy_offsets[rng.gen_range(0..cpm.copy_offsets.len())];
+            let source_flat = cpm.state.lattice.neighbour(target_flat, source_offset);
+            let losing_id = cpm.state.lattice.get(target_flat);
+            let gaining_id = cpm.state.lattice.get(source_flat);
+            if losing_id == gaining_id {
+                continue;
+            }
+            if !preserves_topology(
+                &cpm.state.lattice,
+                target_flat,
+                losing_id,
+                &cpm.topology_offsets,
+            ) {
+                continue;
+            }
+            proposals.push((target_flat, source_flat, losing_id, gaining_id));
+        }
+
+        let mut sequential_sum = 0.0;
+        let sequential_start = Instant::now();
+        for &(target_flat, source_flat, losing_id, gaining_id) in &proposals {
+            let ctx = ctx_from_parts(&cpm, target_flat, source_flat, losing_id, gaining_id);
+            sequential_sum += cpm.terms.total_delta(&ctx);
+        }
+        let sequential_elapsed = sequential_start.elapsed();
+        std::hint::black_box(sequential_sum);
+
+        let mut fused_sum = 0.0;
+        let fused_start = Instant::now();
+        for &(target_flat, source_flat, losing_id, gaining_id) in &proposals {
+            let ctx = ctx_from_parts(&cpm, target_flat, source_flat, losing_id, gaining_id);
+            fused_sum += cpm.terms.fused_conservative_delta(&ctx).total;
+        }
+        let fused_elapsed = fused_start.elapsed();
+        std::hint::black_box(fused_sum);
+
+        eprintln!(
+            "total_delta (sequential): {:.1} ns/call ({} calls in {:?})",
+            sequential_elapsed.as_nanos() as f64 / proposals.len() as f64,
+            proposals.len(),
+            sequential_elapsed
+        );
+        eprintln!(
+            "fused_conservative_delta: {:.1} ns/call ({} calls in {:?})",
+            fused_elapsed.as_nanos() as f64 / proposals.len() as f64,
+            proposals.len(),
+            fused_elapsed
+        );
+    }
+
+    fn ctx_from_parts(
+        cpm: &CPM<3>,
+        target_flat: usize,
+        source_flat: usize,
+        losing_id: crate::lattice::CellId,
+        gaining_id: crate::lattice::CellId,
+    ) -> CopyContext<'_, 3> {
+        CopyContext {
+            lattice: &cpm.state.lattice,
+            state: &cpm.state,
+            target_flat,
+            source_flat,
+            losing_id,
+            gaining_id,
+            mcs: cpm.mcs,
+        }
+    }
+}
+
 /// Tests for the Act term: the optimised `delta` checked against an
 /// independent, deliberately differently-coded reference implementation
 /// across a range of scenarios.

@@ -78,6 +78,7 @@ pub fn attempt_at<const D: usize>(
         return false;
     }
 
+    #[cfg(not(feature = "fused-energy"))]
     let (delta_h_conservative, delta_h) = {
         let ctx = CopyContext {
             lattice: &cpm.state.lattice,
@@ -95,9 +96,32 @@ pub fn attempt_at<const D: usize>(
         // `delta_h_conservative`, never the combined `delta_h`.
         (conservative, conservative + cpm.terms.act_delta(&ctx))
     };
+    // Prices the move in one pass over the energy neighbourhood and keeps
+    // the interface delta pair around for `commit_accepted`, instead of
+    // pricing with `total_delta` and then recomputing that same pair on
+    // acceptance.
+    #[cfg(feature = "fused-energy")]
+    let (delta_h_conservative, delta_h, fused_interface_deltas) = {
+        let ctx = CopyContext {
+            lattice: &cpm.state.lattice,
+            state: &cpm.state,
+            target_flat,
+            source_flat,
+            losing_id,
+            gaining_id,
+            mcs: cpm.mcs,
+        };
+        let priced = cpm.terms.fused_conservative_delta(&ctx);
+        (
+            priced.total,
+            priced.total + cpm.terms.act_delta(&ctx),
+            priced.interface_deltas,
+        )
+    };
 
     let accept = decide_acceptance(cpm, target_flat, losing_id, gaining_id, delta_h);
     if accept {
+        #[cfg(not(feature = "fused-energy"))]
         commit_accepted(
             cpm,
             target_flat,
@@ -105,6 +129,16 @@ pub fn attempt_at<const D: usize>(
             losing_id,
             gaining_id,
             delta_h_conservative,
+        );
+        #[cfg(feature = "fused-energy")]
+        commit_accepted(
+            cpm,
+            target_flat,
+            source_flat,
+            losing_id,
+            gaining_id,
+            delta_h_conservative,
+            fused_interface_deltas,
         );
     }
     accept
@@ -189,6 +223,7 @@ fn neighbour_counts<const D: usize>(
     (n_a, n_b)
 }
 
+#[cfg(not(feature = "fused-energy"))]
 fn commit_accepted<const D: usize>(
     cpm: &mut CPM<D>,
     target_flat: usize,
@@ -232,6 +267,47 @@ fn commit_accepted<const D: usize>(
     // `attempt`) must never appear here, since this is exactly the value
     // the brute-force checker compares against a from-scratch conservative
     // recomputation.
+    cpm.state.conservative_energy += delta_h_conservative;
+}
+
+/// Same as the default `commit_accepted`, except the interface delta pair
+/// arrives already computed from pricing the move (`fused_conservative_delta`
+/// in `attempt_at`), so this books it directly instead of walking the energy
+/// neighbourhood a second time.
+#[cfg(feature = "fused-energy")]
+fn commit_accepted<const D: usize>(
+    cpm: &mut CPM<D>,
+    target_flat: usize,
+    source_flat: usize,
+    losing_id: CellId,
+    gaining_id: CellId,
+    delta_h_conservative: f64,
+    interface_deltas: (f64, f64),
+) {
+    {
+        let ctx = CopyContext {
+            lattice: &cpm.state.lattice,
+            state: &cpm.state,
+            target_flat,
+            source_flat,
+            losing_id,
+            gaining_id,
+            mcs: cpm.mcs,
+        };
+        cpm.terms.commit(&ctx);
+    }
+    dynamics::commit(
+        &mut cpm.state,
+        target_flat,
+        losing_id,
+        gaining_id,
+        interface_deltas,
+        &cpm.energy_offsets,
+        &cpm.energy_weights,
+    );
+    if let Some(edge_list) = cpm.edge_list.as_mut() {
+        edge_list.update_around(&cpm.state.lattice, target_flat, &cpm.copy_offsets);
+    }
     cpm.state.conservative_energy += delta_h_conservative;
 }
 
