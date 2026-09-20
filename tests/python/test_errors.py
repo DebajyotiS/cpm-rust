@@ -1,9 +1,8 @@
 """Configuration errors surface as Python exceptions with actionable
 messages, never as a crash."""
 
-import pytest
-
 import cpm
+import pytest
 
 
 def test_unsupported_grid_length_raises_value_error():
