@@ -23,7 +23,7 @@ def test_unknown_boundary_string_raises_value_error():
 
 def test_non_square_adhesion_matrix_raises_at_run_time():
     sim = cpm.CPM(grid=(10, 10), boundary="periodic", seed=1)
-    sim.add_cell_type(
+    sim.register_cell_type(
         name="a", target_volume=20, target_interface=50, lambda_volume=1.0, lambda_interface=1.0
     )
     sim.add_cells(cell_type="a", n=1)
@@ -35,7 +35,7 @@ def test_non_square_adhesion_matrix_raises_at_run_time():
 def test_positive_lambda_act_with_zero_max_act_raises_immediately():
     sim = cpm.CPM(grid=(10, 10), boundary="periodic", seed=1)
     with pytest.raises(ValueError, match="max_act"):
-        sim.add_cell_type(
+        sim.register_cell_type(
             name="a",
             target_volume=20,
             target_interface=50,

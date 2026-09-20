@@ -24,7 +24,7 @@ def test_suppressible_via_simplefilter():
 
 def _sim():
     sim = cpm.CPM(grid=(20, 20), boundary="periodic", seed=1)
-    sim.add_cell_type(
+    sim.register_cell_type(
         name="a", target_volume=20, target_interface=50, lambda_volume=1.0, lambda_interface=1.0
     )
     sim.add_cells(cell_type="a", n=2)
@@ -51,7 +51,7 @@ def test_warn_on_default_init_false_suppresses_it():
 
 def test_explicit_placement_never_warns_regardless_of_the_flag():
     sim = cpm.CPM(grid=(4, 4), boundary="fixed", seed=1)
-    sim.add_cell_type(
+    sim.register_cell_type(
         name="a", target_volume=1, target_interface=4, lambda_volume=1.0, lambda_interface=1.0
     )
     sim.set_adhesion([[0.0, 1.0], [1.0, 0.0]])

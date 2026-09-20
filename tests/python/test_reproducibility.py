@@ -44,10 +44,10 @@ def _run(seed: int):
         connectivity_neighborhood="von_neumann",
         acceptance="metropolis",
     )
-    sim.add_cell_type(
+    sim.register_cell_type(
         "a", target_volume=12, target_interface=24, lambda_volume=1.0, lambda_interface=0.2
     )
-    sim.add_cell_type(
+    sim.register_cell_type(
         "b", target_volume=12, target_interface=24, lambda_volume=1.2, lambda_interface=0.15
     )
     sim.add_cells("a", 1)

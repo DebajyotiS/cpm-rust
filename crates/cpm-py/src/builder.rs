@@ -197,7 +197,7 @@ impl Simulation {
         lambda_act=0.0, max_act=0,
     ))]
     #[allow(clippy::too_many_arguments)]
-    fn add_cell_type(
+    fn register_cell_type(
         &mut self,
         name: String,
         target_volume: u32,
@@ -241,7 +241,7 @@ impl Simulation {
     fn add_cells(&mut self, cell_type: String, n: usize) -> PyResult<()> {
         let idx = *self.type_index.get(&cell_type).ok_or_else(|| {
             PyValueError::new_err(format!(
-                "unknown cell type {cell_type:?}; call add_cell_type first"
+                "unknown cell type {cell_type:?}; call register_cell_type first"
             ))
         })?;
         match &mut self.builder {
@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn add_cell_type_rejects_invalid_type() {
+    fn register_cell_type_rejects_invalid_type() {
         ensure_python_home();
         let mut sim = Simulation::new(
             vec![10, 10],
@@ -465,7 +465,7 @@ mod tests {
         )
         .unwrap();
         let err = sim
-            .add_cell_type("bad".into(), 20, 50, -1.0, 1.0, 0.0, 0)
+            .register_cell_type("bad".into(), 20, 50, -1.0, 1.0, 0.0, 0)
             .unwrap_err();
         assert!(err.to_string().contains("non-negative"), "{err}");
     }

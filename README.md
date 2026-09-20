@@ -50,7 +50,7 @@ sim = cpm.CPM(
 )
 
 # Configure cell types and parameters
-sim.add_cell_type(
+sim.register_cell_type(
     name="epithelial",
     target_volume=50,
     target_interface=75,
@@ -317,7 +317,7 @@ there's no separate dimension argument anywhere in this API.
 | `proposal` | `"uniform"` \| `"edge_list"` | `"uniform"` | `"edge_list"` only proposes moves at existing interfaces, which matters a lot at 3D organoid scale; incompatible with `acceptance="metropolis_hastings"` |
 | `active_terms` | dict with any of `"volume"`, `"interface"`, `"adhesion"`, `"act"` → bool | all `True` | toggles Hamiltonian terms off for debugging/ablation |
 
-### `sim.add_cell_type(...)` / `sim.add_cells(...)`: cell types and population
+### `sim.register_cell_type(...)` / `sim.add_cells(...)`: cell types and population
 
 | Argument | Meaning |
 |---|---|

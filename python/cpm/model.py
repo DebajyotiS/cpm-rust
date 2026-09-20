@@ -21,8 +21,8 @@ from .warnings import CPMInitializationWarning
 
 class CPM:
     """One CPM trajectory. Configure with the constructor and the
-    ``add_cell_type``/``add_cells``/``set_adhesion``/``initialize`` builder
-    calls, then call :meth:`run`. Nothing executes in Rust until
+    ``register_cell_type``/``add_cells``/``set_adhesion``/``initialize``
+    builder calls, then call :meth:`run`. Nothing executes in Rust until
     :meth:`run` is called: Python only configures the simulation, it does
     not step it.
     """
@@ -52,7 +52,7 @@ class CPM:
         )
         self._warn_on_default_init = True
 
-    def add_cell_type(
+    def register_cell_type(
         self,
         name: str,
         target_volume: int,
@@ -62,7 +62,7 @@ class CPM:
         lambda_act: float = 0.0,
         max_act: int = 0,
     ) -> None:
-        self._raw.add_cell_type(
+        self._raw.register_cell_type(
             name,
             target_volume,
             target_interface,
