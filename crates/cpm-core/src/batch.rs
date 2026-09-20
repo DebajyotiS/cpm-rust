@@ -10,13 +10,14 @@ use crate::initialization::{self, InitError};
 use crate::model::CPM;
 use crate::output::{self, RunOptions, RunResult};
 use crate::rng::derive_seed_u64;
-use crate::theta::{self, theta_len};
+use crate::theta::{self, theta_len, ThetaError};
 use rayon::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BatchError {
     Config(ConfigError),
     Init(InitError),
+    Theta(ThetaError),
     WrongThetaLength {
         index: usize,
         expected: usize,
@@ -29,6 +30,7 @@ impl std::fmt::Display for BatchError {
         match self {
             BatchError::Config(e) => write!(f, "{e}"),
             BatchError::Init(e) => write!(f, "{e}"),
+            BatchError::Theta(e) => write!(f, "{e}"),
             BatchError::WrongThetaLength {
                 index,
                 expected,
@@ -52,6 +54,12 @@ impl From<ConfigError> for BatchError {
 impl From<InitError> for BatchError {
     fn from(e: InitError) -> Self {
         BatchError::Init(e)
+    }
+}
+
+impl From<ThetaError> for BatchError {
+    fn from(e: ThetaError) -> Self {
+        BatchError::Theta(e)
     }
 }
 
@@ -120,7 +128,7 @@ pub fn run_batch<const D: usize>(
         .enumerate()
         .map(|(index, theta)| {
             let mut config = base_config.clone();
-            theta::inject(&mut config, theta);
+            theta::inject(&mut config, theta)?;
             config.seed = derive_seed_u64(options.master_seed, index as u64);
 
             let mut cpm = CPM::new(config)?;
