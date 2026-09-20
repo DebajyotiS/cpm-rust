@@ -371,6 +371,41 @@ trajectory finishes. There's no per-step callback into Python.
 * `result.cell_type_index`, `result.cell_type_names`: map each cell ID to
   its type, once per run
 
+### `sim.run_batch(...)`: many independent simulations, in parallel
+
+| Argument | Meaning |
+|---|---|
+| `thetas` | a list of `theta` vectors (see below), one simulation per entry |
+| `burn_in_mcs`, `readout_mcs`, `sampling_interval_mcs` | same meaning as `run()`, shared by every simulation in the batch |
+| `master_seed` | each simulation's actual seed is derived deterministically from `(master_seed, index)`, so results don't depend on how the work happens to get scheduled across threads |
+| `include_lattice` | same meaning as `run()` |
+
+Runs every `theta` as its own independent trajectory across available CPU
+cores (Rayon under the hood, GIL released for the whole batch — not per
+simulation). Returns a list of `RunResult`, one per `theta`, in the same
+order as `thetas`. At most one `CPMInitializationWarning` fires for the
+whole call, not one per simulation, if any batch member used default
+placement.
+
+```python
+base_theta = sim.extract_theta()
+thetas = [base_theta, [v * 1.1 for v in base_theta], [v * 0.9 for v in base_theta]]
+results = sim.run_batch(
+    thetas, burn_in_mcs=5000, readout_mcs=5000, sampling_interval_mcs=100, master_seed=42
+)
+```
+
+### `sim.theta_names()` / `sim.extract_theta()`: labelling and building `theta`
+
+`theta_names()` returns the canonical parameter names in the exact order
+every `theta` vector must use — `[lambda_volume[type...], lambda_interface[type...],
+J[medium][medium], J[medium][type...], J[type][type]..., lambda_act[type...],
+max_act[type...]]`. `extract_theta()` returns the current configuration's own
+`theta`, a natural starting point to perturb before calling `run_batch`. Both
+require `register_cell_type`/`set_adhesion` to already be called, but not
+`burn_in_mcs`/`readout_mcs`/`sampling_interval_mcs` — `theta` only depends on
+cell-type and adhesion structure.
+
 ### Helpers
 
 * `cpm.cells_for_density(grid, target_volume, phi)` inverts
@@ -416,6 +451,10 @@ cargo bench
 # Run Python test suite
 uv run --with maturin maturin develop --release && uv run pytest tests/python
 
+# Format and lint the Python side (python/, tests/python/, and the notebooks)
+uv run ruff format python/ tests/python/ notebooks/*.ipynb
+uv run ruff check python/ tests/python/ notebooks/*.ipynb
+
 ```
 
 The `--features checker` flag recomputes global energy, volumes, and interface counts from scratch after every accepted move to catch incremental state drift.
@@ -430,10 +469,12 @@ The `--features fused-energy` flag switches `cpm-core` to a single-pass computat
 ## CI/CD
 
 `.github/workflows/ci.yml` runs on every push and pull request: `cargo fmt --check`,
-`clippy -D warnings`, an MSRV check pinned to the `rust-version` in `Cargo.toml`,
-`cargo test -p cpm-core`/`-p cpm-py` (release, non-ignored), a compile-only check of
-the Criterion benches, and the `pytest` suite built via `maturin develop --release`.
-All of that finishes in well under a minute.
+`clippy -D warnings`, `ruff format --check` and `ruff check` for the Python side
+(`python/`, `tests/python/`, and the notebooks — ruff understands `.ipynb` natively),
+an MSRV check pinned to the `rust-version` in `Cargo.toml`, `cargo test -p
+cpm-core`/`-p cpm-py` (release, non-ignored), a compile-only check of the Criterion
+benches, and the `pytest` suite built via `maturin develop --release`. All of that
+finishes in well under a minute.
 
 The brute-force checker and the exact-Boltzmann validation tests are excluded from
 that workflow. Measured end-to-end, `cargo test -p cpm-core --release --features
@@ -447,6 +488,32 @@ any pull request that touches a correctness-critical module (`energy.rs`,
 `theta.rs`, `checker.rs`, `edge_list.rs`). A PR that only touches the Python layer or
 docs never pays the 12-minute cost; one that touches the Hamiltonian or the Monte
 Carlo loop pays it before merge, not just at the next nightly run.
+
+</details>
+
+<details>
+<summary>Local Git Hooks</summary>
+
+## Local Git Hooks
+
+`.githooks/pre-push` runs `cargo fmt --check` and `clippy -D warnings` for Rust, plus
+`ruff format --check` and `ruff check` for Python (`python/`, `tests/python/`, and the
+notebooks), before a push leaves your machine — the same checks CI runs first, just
+earlier, so a formatting or lint failure never even reaches a PR. It deliberately
+doesn't run either test suite; that stays CI's job, so the hook stays fast enough that
+nobody's tempted to routinely skip it.
+
+One-time setup per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+To bypass it for a specific push (rare — a genuine emergency, not routine impatience):
+
+```bash
+git push --no-verify
+```
 
 </details>
 

@@ -29,6 +29,16 @@ pub fn rng_from_derived_seed(master_seed: u64, simulation_index: u64) -> Rng {
     Xoshiro256PlusPlus::from_seed(derive_seed(master_seed, simulation_index))
 }
 
+/// The `u64`-producing half of [`derive_seed`], for callers that need to set
+/// `ResolvedConfig::seed` directly rather than build a [`Rng`] themselves —
+/// `CPM::new` only ever seeds via `rng_from_seed(config.seed)`, so batch
+/// execution derives a `u64` per simulation and assigns it to the config
+/// instead of constructing an `Rng` out of band.
+pub fn derive_seed_u64(master_seed: u64, simulation_index: u64) -> u64 {
+    let bytes = derive_seed(master_seed, simulation_index);
+    u64::from_le_bytes(bytes[..8].try_into().unwrap())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +76,24 @@ mod tests {
         for _ in 0..50 {
             assert_eq!(a.next_u64(), b.next_u64());
         }
+    }
+
+    #[test]
+    fn derive_seed_u64_is_deterministic_and_index_sensitive() {
+        assert_eq!(derive_seed_u64(7, 3), derive_seed_u64(7, 3));
+        assert_ne!(derive_seed_u64(7, 3), derive_seed_u64(7, 4));
+        assert_ne!(derive_seed_u64(7, 3), derive_seed_u64(8, 3));
+    }
+
+    #[test]
+    fn derive_seed_u64_changes_the_resulting_rng_stream() {
+        let seed_a = derive_seed_u64(1, 0);
+        let seed_b = derive_seed_u64(1, 1);
+        assert_ne!(seed_a, seed_b);
+        let mut a = rng_from_seed(seed_a);
+        let mut b = rng_from_seed(seed_b);
+        let stream_a: Vec<u64> = (0..20).map(|_| a.next_u64()).collect();
+        let stream_b: Vec<u64> = (0..20).map(|_| b.next_u64()).collect();
+        assert_ne!(stream_a, stream_b);
     }
 }

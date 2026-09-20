@@ -17,15 +17,17 @@
 //! before `resolve()`/`CPM::new` are called.
 
 use crate::convert::{self, PyRunResult};
-use crate::errors::{cell_type_err, config_err, init_err};
+use crate::errors::{batch_err, cell_type_err, config_err, init_err};
+use cpm_core::batch::{self, BatchOptions};
 use cpm_core::cell::CellType;
 use cpm_core::config::{
-    AcceptanceMode, EnergyTermSet, InitializationSpec, ProposalMode, UserConfig,
+    AcceptanceMode, EnergyTermSet, InitializationSpec, ProposalMode, ResolvedConfig, UserConfig,
 };
 use cpm_core::initialization;
 use cpm_core::lattice::Boundary;
 use cpm_core::model::CPM;
 use cpm_core::neighborhood::NeighborhoodKind;
+use cpm_core::theta;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -329,6 +331,88 @@ impl Simulation {
             ),
         }
     }
+
+    /// Runs one independent trajectory per entry in `thetas`, in parallel
+    /// (`cpm_core::batch::run_batch`, Rayon under the hood), with the GIL
+    /// released for the whole batch — the same release point `run` uses,
+    /// just around more work. Returns `(any_used_default, results)`: one
+    /// aggregated flag rather than one per simulation, since a training run
+    /// of thousands of simulations would otherwise print a warning per
+    /// simulation.
+    #[pyo3(signature = (
+        thetas, burn_in_mcs, readout_mcs, sampling_interval_mcs, master_seed,
+        include_lattice=false,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_batch(
+        &self,
+        py: Python<'_>,
+        thetas: Vec<Vec<f64>>,
+        burn_in_mcs: u64,
+        readout_mcs: u64,
+        sampling_interval_mcs: u64,
+        master_seed: u64,
+        include_lattice: bool,
+    ) -> PyResult<(bool, Vec<Py<PyRunResult>>)> {
+        match &self.builder {
+            Builder::D2(cfg) => run_batch_generic::<2>(
+                py,
+                cfg.clone(),
+                self.active_terms,
+                thetas,
+                burn_in_mcs,
+                readout_mcs,
+                sampling_interval_mcs,
+                master_seed,
+                include_lattice,
+            ),
+            Builder::D3(cfg) => run_batch_generic::<3>(
+                py,
+                cfg.clone(),
+                self.active_terms,
+                thetas,
+                burn_in_mcs,
+                readout_mcs,
+                sampling_interval_mcs,
+                master_seed,
+                include_lattice,
+            ),
+        }
+    }
+
+    /// The canonical `theta` parameter names, in the same order `theta`
+    /// vectors use — labels posterior dimensions without a Python-side
+    /// reimplementation of the layout in `theta.rs`.
+    fn theta_names(&self) -> PyResult<Vec<String>> {
+        match &self.builder {
+            Builder::D2(cfg) => Ok(theta::names(&resolve_for_theta(cfg)?)),
+            Builder::D3(cfg) => Ok(theta::names(&resolve_for_theta(cfg)?)),
+        }
+    }
+
+    /// The current configuration's `theta`, in canonical order — a natural
+    /// starting point to perturb before calling `run_batch`.
+    fn extract_theta(&self) -> PyResult<Vec<f64>> {
+        match &self.builder {
+            Builder::D2(cfg) => Ok(theta::extract(&resolve_for_theta(cfg)?)),
+            Builder::D3(cfg) => Ok(theta::extract(&resolve_for_theta(cfg)?)),
+        }
+    }
+}
+
+/// Resolves the builder's current config purely to read off `theta`
+/// (`theta_names`/`extract_theta`), which a caller may want before
+/// `burn_in_mcs`/`readout_mcs`/`sampling_interval_mcs` are known (those are
+/// only supplied at `run`/`run_batch` time). `theta::names`/`theta::extract`
+/// only read `cell_types`/`adhesion`, so placeholder window values stand in
+/// here rather than asking the caller for real ones just to ask what
+/// `theta` looks like.
+fn resolve_for_theta<const D: usize>(cfg: &UserConfig<D>) -> PyResult<ResolvedConfig<D>> {
+    let mut cfg = cfg.clone();
+    cfg.burn_in_mcs = Some(cfg.burn_in_mcs.unwrap_or(1));
+    cfg.readout_mcs = Some(cfg.readout_mcs.unwrap_or(1));
+    cfg.sampling_interval_mcs = Some(cfg.sampling_interval_mcs.unwrap_or(1));
+    cfg.resolve().map_err(config_err)
 }
 
 /// `UserConfig<D>::resolve` requires `burn_in_mcs`/`readout_mcs`/
@@ -379,6 +463,57 @@ fn run_generic<const D: usize>(
 
     let py_result = convert::to_py_run_result(py, result, cell_type_index, cell_type_names, &grid)?;
     Ok((outcome.used_default, py_result))
+}
+
+/// Same shape as `run_generic`, but resolves once and runs every `theta`
+/// against that one resolved config in parallel
+/// (`cpm_core::batch::run_batch`). `cell_type_names` comes from the
+/// resolved base config directly — theta injection never renames or adds
+/// cell types, so it's identical for every batch member and doesn't need
+/// re-deriving per simulation the way `cell_type_index` does (see
+/// `BatchItem`'s own doc comment for why that one has to come back from
+/// each simulation's own `CPM`).
+#[allow(clippy::too_many_arguments)]
+fn run_batch_generic<const D: usize>(
+    py: Python<'_>,
+    mut user_config: UserConfig<D>,
+    active_terms: EnergyTermSet,
+    thetas: Vec<Vec<f64>>,
+    burn_in_mcs: u64,
+    readout_mcs: u64,
+    sampling_interval_mcs: u64,
+    master_seed: u64,
+    include_lattice: bool,
+) -> PyResult<(bool, Vec<Py<PyRunResult>>)> {
+    user_config.burn_in_mcs = Some(burn_in_mcs);
+    user_config.readout_mcs = Some(readout_mcs);
+    user_config.sampling_interval_mcs = Some(sampling_interval_mcs);
+
+    let mut resolved = user_config.resolve().map_err(config_err)?;
+    resolved.active_terms = active_terms;
+    let grid = resolved.grid.to_vec();
+    let cell_type_names: Vec<String> = resolved.cell_types.iter().map(|t| t.name.clone()).collect();
+
+    let batch_options = BatchOptions {
+        master_seed,
+        include_lattice,
+    };
+    let items = py
+        .allow_threads(|| batch::run_batch(&resolved, &thetas, batch_options))
+        .map_err(batch_err)?;
+
+    let any_used_default = items.iter().any(|item| item.used_default);
+    let mut results = Vec::with_capacity(items.len());
+    for item in items {
+        results.push(convert::to_py_run_result(
+            py,
+            item.result,
+            item.cell_type_index,
+            cell_type_names.clone(),
+            &grid,
+        )?);
+    }
+    Ok((any_used_default, results))
 }
 
 #[cfg(test)]
