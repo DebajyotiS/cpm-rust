@@ -13,6 +13,8 @@ dependencies = ["numpy"]
 dev = [
     "ipykernel>=6.31.0",
     "matplotlib>=3.9.4",
+    "nbformat>=5.10.0",
+    "plotly>=5.24.0",
     "pytest>=8.0",
 ]
 
