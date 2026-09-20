@@ -321,7 +321,7 @@ there's no separate dimension argument anywhere in this API.
 
 | Argument | Meaning |
 |---|---|
-| `target_volume` (V\*), `target_interface` (I\*) | equilibrium targets; measure these per type/dimension rather than guessing (see the `calibrate-targets` workflow and `crates/cpm-core/examples/calibrate_targets.rs`) |
+| `target_volume` (V\*), `target_interface` (I\*) | equilibrium targets; measure these empirically per type/dimension (see the `calibrate-targets` workflow and `crates/cpm-core/examples/calibrate_targets.rs`) |
 | `lambda_volume`, `lambda_interface` | stiffness of each constraint |
 | `lambda_act`, `max_act` | optional Act migration term; `lambda_act=0.0` (the default) disables it |
 | `add_cells(cell_type, n)` | how many cells of that type to create; cell count never varies with `theta` |
@@ -402,9 +402,9 @@ every `theta` vector must use — `[lambda_volume[type...], lambda_interface[typ
 J[medium][medium], J[medium][type...], J[type][type]..., lambda_act[type...],
 max_act[type...]]`. `extract_theta()` returns the current configuration's own
 `theta`, a natural starting point to perturb before calling `run_batch`. Both
-require `register_cell_type`/`set_adhesion` to already be called, but not
-`burn_in_mcs`/`readout_mcs`/`sampling_interval_mcs` — `theta` only depends on
-cell-type and adhesion structure.
+require `register_cell_type`/`set_adhesion` to already be called; `theta`
+depends only on cell-type and adhesion structure, independent of
+`burn_in_mcs`/`readout_mcs`/`sampling_interval_mcs`.
 
 ### Helpers
 
@@ -426,7 +426,7 @@ cell-type and adhesion structure.
    in `notebooks/3d_organoid_demo.ipynb` about placing cells at full size.
 6. For 3D at organoid scale specifically: `energy_neighborhood="eighteen"`,
    `proposal="edge_list"`, and usually an explicit `sim.initialize(...)`
-   placement (small, connected seeds) rather than the default scatter-and-grow.
+   placement with small, connected seeds.
 
 </details>
 
@@ -459,7 +459,7 @@ uv run ruff check python/ tests/python/ notebooks/*.ipynb
 
 The `--features checker` flag recomputes global energy, volumes, and interface counts from scratch after every accepted move to catch incremental state drift.
 
-The `--features fused-energy` flag switches `cpm-core` to a single-pass computation of the interface and adhesion terms, and reuses the interface delta computed while pricing a move instead of recomputing it when the move is accepted. It's verified bit-identical to the default path — the frozen-trajectory regression test, the brute-force checker, and the exact-Boltzmann validation all pass unchanged under it. It is **not** the default, though: benchmarked at inference-scale confluent density, it shows no statistically significant throughput improvement over the default path in most cases, and one small-grid benchmark regressed. It's kept as correct, tested, opt-in infrastructure rather than switched on by default.
+The `--features fused-energy` flag switches `cpm-core` to a single-pass computation of the interface and adhesion terms, and reuses the interface delta computed while pricing a move instead of recomputing it when the move is accepted. It's verified bit-identical to the default path — the frozen-trajectory regression test, the brute-force checker, and the exact-Boltzmann validation all pass unchanged under it. It is **not** the default, though: benchmarked at inference-scale confluent density, it shows no statistically significant throughput improvement over the default path in most cases, and one small-grid benchmark regressed. It's kept as correct, tested, opt-in infrastructure.
 
 </details>
 
