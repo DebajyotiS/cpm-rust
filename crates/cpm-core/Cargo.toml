@@ -6,6 +6,12 @@ version.workspace = true
 
 [features]
 checker = []
+# Prices the interface and adhesion terms in a single pass over the energy
+# neighbourhood and reuses that pass's interface delta when booking an
+# accepted move, rather than computing it twice. Produces the same
+# floating-point result as the default path — see
+# `energy::Terms::fused_conservative_delta`.
+fused-energy = []
 
 [dependencies]
 serde = { workspace = true }
