@@ -35,6 +35,13 @@ These are the actual simulated lattice, pixel-for-pixel, not a schematic, produc
 
 See the notebooks for the full runs, including interactive 3D isosurface rendering and lumen-formation checks.
 
+## Notebooks
+
+* `notebooks/2d_organoid_demo.ipynb`: differential adhesion sorting in 2D. Start here for parameters and initialization basics.
+* `notebooks/3d_organoid_demo.ipynb`: nested-layer organoid formation in 3D, including V*/I* calibration and explicit placement.
+* `notebooks/batch_execution_demo.ipynb`: `theta` vectors and `run_batch`, for parameter sweeps and building SBI training sets.
+* `notebooks/performance_demo.ipynb`: what settings to pick for your grid size, dimension, and compute budget. Start here if you want to know how fast a run will be, or whether `proposal="edge_list"` or `run_batch` will actually help.
+
 ## Quickstart
 
 ```python
@@ -314,7 +321,7 @@ there's no separate dimension argument anywhere in this API.
 | `energy_neighborhood` | same set as above | `"moore"` in 2D, `"eighteen"` in 3D | used by the interface/adhesion terms; an unweighted 26-neighbour stencil in 3D causes cubic faceting, so `"eighteen"` is recommended over `"twenty_six"` there |
 | `connectivity_neighborhood` | same set as above | `"von_neumann"` | must be a superset of `copy_neighborhood` (checked at config time) |
 | `acceptance` | `"metropolis"` \| `"metropolis_hastings"` | `"metropolis"` | `"metropolis_hastings"` is for the dedicated MH validation mode, not general use |
-| `proposal` | `"uniform"` \| `"edge_list"` | `"uniform"` | `"edge_list"` only proposes moves at existing interfaces, which matters a lot at 3D organoid scale; incompatible with `acceptance="metropolis_hastings"` |
+| `proposal` | `"uniform"` \| `"edge_list"` | `"uniform"` | `"edge_list"` only proposes moves at existing interfaces. Whether that helps depends on density, not dimension: this project's own confluent-density benchmarks measured it slower than `"uniform"`, not faster. See `notebooks/performance_demo.ipynb` before switching. Incompatible with `acceptance="metropolis_hastings"` |
 | `active_terms` | dict with any of `"volume"`, `"interface"`, `"adhesion"`, `"act"` → bool | all `True` | toggles Hamiltonian terms off for debugging/ablation |
 
 ### `sim.register_cell_type(...)` / `sim.add_cells(...)`: cell types and population
@@ -425,8 +432,10 @@ depends only on cell-type and adhesion structure, independent of
    starts. This matters more than it sounds like it should; see the "gotcha"
    in `notebooks/3d_organoid_demo.ipynb` about placing cells at full size.
 6. For 3D at organoid scale specifically: `energy_neighborhood="eighteen"`,
-   `proposal="edge_list"`, and usually an explicit `sim.initialize(...)`
-   placement with small, connected seeds.
+   and usually an explicit `sim.initialize(...)` placement with small,
+   connected seeds. `uniform` is the safe default for `proposal` here too.
+   Only switch to `edge_list` after benchmarking your own configuration; see
+   `notebooks/performance_demo.ipynb`.
 
 </details>
 
