@@ -1,9 +1,11 @@
 //! Criterion benchmarks for readout cost, separate from `monte_carlo.rs`'s
 //! dynamics benchmarks. `labelling::label_components` is a whole-lattice
 //! flood fill kept out of the hot loop and run only at
-//! `sampling_interval_mcs` cadence (`output::run`) — this file confirms
-//! that cadence is actually affordable, especially in 3D, which is the
-//! inference target (roughly 64^3 sites and 200 cells).
+//! `sampling_interval_mcs` cadence (`output::run`) — this file measures
+//! that cadence's cost, especially in 3D, which is the inference target
+//! (roughly 64^3 sites and 200 cells). See `docs/conventions.md` §45 for
+//! the measured affordability conclusion (~7.5% of one MCS at this
+//! project's confluent-density regime) rather than an asserted one.
 //!
 //! Every benchmark seeds and initialises fresh inside the `iter` closure's
 //! setup, matching `monte_carlo.rs`'s own rationale: reusing one `CPM`
@@ -221,6 +223,71 @@ fn shape_descriptors_cost(c: &mut Criterion) {
     group.finish();
 }
 
+/// The confluent-density 3D fixture (40^3, `V* = 125`, 150 cells, phi≈0.29)
+/// `benches/scale.rs`'s `build_confluent_3d` already established as this
+/// project's working inference-representative regime — duplicated here
+/// rather than imported, since bench files are separate binaries and can't
+/// share private helpers, the same reason
+/// `monte_carlo::tests::diag_total_delta_vs_commit_cost_3d` duplicates it.
+/// `scaling_config_3d`'s 20-cells-at-every-grid-size sweep above answers
+/// "how does the flood fill scale with lattice size," but never actually
+/// reaches this crate's own established confluent density — this fixture
+/// does, at the specific size/cell-count/density `scale.rs`'s throughput
+/// numbers are already measured against, so the flood-fill and full-window
+/// costs below are directly comparable to those MCS/sec figures.
+fn confluent_config_3d(seed: u64) -> CPM<3> {
+    let config = UserConfig::<3> {
+        grid: Some([40, 40, 40]),
+        boundary: Some(Boundary::Periodic),
+        cell_types: vec![CellType {
+            name: "a".into(),
+            target_volume: 125,
+            target_interface: 250,
+            lambda_volume: 1.0,
+            lambda_interface: 0.2,
+            lambda_act: 0.0,
+            max_act: 0,
+        }],
+        cell_counts: vec![150],
+        adhesion: Some(vec![vec![0.0, 3.0], vec![3.0, 1.0]]),
+        burn_in_mcs: Some(0),
+        readout_mcs: Some(1),
+        sampling_interval_mcs: Some(1),
+        seed: Some(seed),
+        ..Default::default()
+    }
+    .resolve()
+    .unwrap();
+    let mut cpm = CPM::new(config).unwrap();
+    initialize(&mut cpm).expect("confluent 3D fixture must initialise");
+    cpm
+}
+
+/// `label_components` cost at the confluent fixture above, rather than at
+/// the sparse (~0.5% occupancy) milestone fixture `label_components_3d`
+/// uses or the fixed-20-cells sweep above — the actual density this
+/// project's inference-scale throughput is measured at.
+fn label_components_3d_confluent(c: &mut Criterion) {
+    let mut group = c.benchmark_group("label_components_3d_confluent");
+    group.throughput(Throughput::Elements(1));
+    group.bench_function("label_components", |b| {
+        b.iter_batched(
+            || confluent_config_3d(1),
+            |cpm| {
+                let medium_offsets =
+                    offset_table(&Stencil::<3>::full(), cpm.state.lattice.strides());
+                label_components(
+                    &cpm.state.lattice,
+                    &cpm.connectivity_offsets,
+                    &medium_offsets,
+                )
+            },
+            BatchSize::SmallInput,
+        );
+    });
+    group.finish();
+}
+
 /// The cost a training run actually pays per readout sample: `output::run`
 /// with a short window (one sampling-interval chunk of burn-in, one of
 /// readout), covering the full per-sample pipeline — per-cell
@@ -270,6 +337,7 @@ criterion_group!(
     label_components_2d,
     label_components_3d,
     label_components_scaling_with_lattice_size_3d,
+    label_components_3d_confluent,
     shape_descriptors_cost,
     run_one_readout_window_3d,
 );
