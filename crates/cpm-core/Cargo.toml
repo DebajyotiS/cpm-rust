@@ -41,3 +41,7 @@ harness = false
 [[bench]]
 name = "topology"
 harness = false
+
+[[bench]]
+name = "batch"
+harness = false
