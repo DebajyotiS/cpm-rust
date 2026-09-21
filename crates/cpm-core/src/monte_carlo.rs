@@ -813,4 +813,286 @@ mod tests {
             update_contact_elapsed
         );
     }
+
+    /// Classifies one attempt exactly like [`attempt_at`] (same early-out,
+    /// connectivity check, energy computation, acceptance decision and
+    /// commit), additionally reporting whether the same-cell early-out
+    /// fired. Duplicated rather than calling `attempt_at` directly:
+    /// `attempt_at` draws its own source offset internally, so classifying
+    /// from outside without reimplementing the body would mean drawing a
+    /// second, different source offset and therefore attempting a different
+    /// (target, source) pair than the one being classified. Only compiled
+    /// for the default (non-fused) energy path — this diagnostic is about
+    /// `ProposalMode`, not `fused-energy`, and `commit_accepted`'s signature
+    /// differs under that feature.
+    #[cfg(not(feature = "fused-energy"))]
+    fn attempt_at_classified<const D: usize>(
+        cpm: &mut CPM<D>,
+        target_flat: usize,
+        check_connectivity: bool,
+    ) -> (bool, bool) {
+        let source_offset = cpm.copy_offsets[cpm.rng.gen_range(0..cpm.copy_offsets.len())];
+        let source_flat = cpm.state.lattice.neighbour(target_flat, source_offset);
+
+        let losing_id = cpm.state.lattice.get(target_flat);
+        let gaining_id = cpm.state.lattice.get(source_flat);
+        if losing_id == gaining_id {
+            return (false, false); // early-out: not a real attempt
+        }
+
+        if check_connectivity
+            && !preserves_topology(
+                &cpm.state.lattice,
+                target_flat,
+                losing_id,
+                &cpm.topology_offsets,
+            )
+        {
+            return (true, false);
+        }
+
+        if losing_id != 0 && cpm.state.volume[index_of(losing_id)] <= cpm.config.min_cell_volume {
+            return (true, false);
+        }
+
+        let ctx = CopyContext {
+            lattice: &cpm.state.lattice,
+            state: &cpm.state,
+            target_flat,
+            source_flat,
+            losing_id,
+            gaining_id,
+            mcs: cpm.mcs,
+        };
+        let delta_h_conservative = cpm.terms.total_delta(&ctx);
+        let delta_h = delta_h_conservative + cpm.terms.act_delta(&ctx);
+
+        let accept = decide_acceptance(cpm, target_flat, losing_id, gaining_id, delta_h);
+        if accept {
+            commit_accepted(
+                cpm,
+                target_flat,
+                source_flat,
+                losing_id,
+                gaining_id,
+                delta_h_conservative,
+            );
+        }
+        (true, accept)
+    }
+
+    /// Runs `mcs_budget` MCS under `cpm`'s current `ProposalMode` — the same
+    /// dispatch [`run_mcs`] uses — classifying every individual attempt via
+    /// [`attempt_at_classified`] instead of calling `attempt`/`attempt_at`
+    /// directly. Returns `(real_attempts, accepted_attempts)`.
+    #[cfg(not(feature = "fused-energy"))]
+    fn measure_real_and_accepted<const D: usize>(cpm: &mut CPM<D>, mcs_budget: u64) -> (u64, u64) {
+        let n_sites = cpm.n_sites();
+        let mut real = 0u64;
+        let mut accepted = 0u64;
+        for _ in 0..mcs_budget {
+            match cpm.config.proposal {
+                ProposalMode::Uniform => {
+                    for _ in 0..n_sites {
+                        let dims = cpm.state.lattice.dims();
+                        let target_coord: [usize; D] =
+                            std::array::from_fn(|d| cpm.rng.gen_range(0..dims[d]));
+                        let target_flat = cpm.state.lattice.flat_index(target_coord);
+                        let (is_real, was_accepted) = attempt_at_classified(cpm, target_flat, true);
+                        real += is_real as u64;
+                        accepted += was_accepted as u64;
+                    }
+                }
+                ProposalMode::EdgeList => {
+                    let edge_count = cpm.edge_list.as_ref().map_or(0, |e| e.len());
+                    let k = if edge_count == 0 {
+                        0
+                    } else {
+                        let p = edge_count as f64 / n_sites as f64;
+                        sample_binomial(&mut cpm.rng, n_sites as u64, p)
+                    };
+                    for _ in 0..k {
+                        let Some(target_flat) =
+                            cpm.edge_list.as_ref().and_then(|e| e.sample(&mut cpm.rng))
+                        else {
+                            break;
+                        };
+                        let (is_real, was_accepted) = attempt_at_classified(cpm, target_flat, true);
+                        real += is_real as u64;
+                        accepted += was_accepted as u64;
+                    }
+                }
+            }
+            cpm.terms.tick::<D>(cpm.mcs);
+            cpm.mcs += 1;
+        }
+        (real, accepted)
+    }
+
+    /// A performance diagnostic testing §37's own leading, unconfirmed
+    /// hypothesis for why `ProposalMode::EdgeList` underperforms `Uniform`
+    /// at confluent density despite every individual overhead
+    /// (`update_around`, the binomial draw, `EdgeList::sample`) already
+    /// being ruled out as the cause: that `EdgeList` concentrates draws on
+    /// the currently active front and so reaches a higher real-attempt
+    /// acceptance rate, and an accepted move is the expensive path (full
+    /// energy computation + `commit` + `update_around`) versus a rejected
+    /// one. Measures the real-attempt acceptance rate for both proposal
+    /// modes on matched confluent 3D fixtures (same config as
+    /// `benches/scale.rs`'s `build_confluent_3d`, duplicated here for the
+    /// same reason `diag_total_delta_vs_commit_cost_3d` duplicates it: that
+    /// file's builders are private to an external bench crate). `#[ignore]`d:
+    /// many real MCS of dynamics, not a Criterion microbenchmark. Run with
+    /// `--release -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "diagnostic only: run with --release -- --ignored --nocapture"]
+    #[cfg(not(feature = "fused-energy"))]
+    fn diag_real_attempt_acceptance_rate_uniform_vs_edge_list_3d() {
+        use crate::cell::CellType;
+        use crate::lattice::Boundary;
+
+        fn build_fixture(proposal: ProposalMode) -> CPM<3> {
+            let config = UserConfig::<3> {
+                grid: Some([40, 40, 40]),
+                // Fixed, not Periodic, for the same reason
+                // `diag_total_delta_vs_commit_cost_3d` uses it: a real,
+                // sustained `MCS_BUDGET`-sized trajectory at confluent
+                // density trips the unwrapped-position half-box guard under
+                // `Periodic` in a debug build (the guard is a no-op under
+                // `Fixed` by construction — `dynamics.rs`'s check
+                // short-circuits on `boundary != Boundary::Periodic`).
+                // Acceptance-rate statistics don't depend on the boundary
+                // condition; this diagnostic never lets cells approach a
+                // fixed wall at this grid size and MCS budget.
+                boundary: Some(Boundary::Fixed),
+                cell_types: vec![CellType {
+                    name: "a".into(),
+                    target_volume: 125,
+                    target_interface: 250,
+                    lambda_volume: 1.0,
+                    lambda_interface: 0.2,
+                    lambda_act: 0.0,
+                    max_act: 0,
+                }],
+                cell_counts: vec![150],
+                adhesion: Some(vec![vec![0.0, 3.0], vec![3.0, 1.0]]),
+                burn_in_mcs: Some(0),
+                readout_mcs: Some(1),
+                sampling_interval_mcs: Some(1),
+                seed: Some(1),
+                proposal: Some(proposal),
+                ..Default::default()
+            }
+            .resolve()
+            .unwrap();
+            let mut cpm = CPM::new(config).unwrap();
+            crate::initialization::initialize(&mut cpm).expect("fixture must initialise");
+            run_mcs(&mut cpm, 5); // relax past the freshly-grown, atypically smooth state
+            cpm
+        }
+
+        const MCS_BUDGET: u64 = 50;
+
+        let mut uniform = build_fixture(ProposalMode::Uniform);
+        let (uniform_real, uniform_accepted) = measure_real_and_accepted(&mut uniform, MCS_BUDGET);
+
+        let mut edge_list = build_fixture(ProposalMode::EdgeList);
+        let (edge_list_real, edge_list_accepted) =
+            measure_real_and_accepted(&mut edge_list, MCS_BUDGET);
+
+        let uniform_rate = uniform_accepted as f64 / uniform_real as f64;
+        let edge_list_rate = edge_list_accepted as f64 / edge_list_real as f64;
+        eprintln!(
+            "[3D] Uniform:  {uniform_real} real attempts, {uniform_accepted} accepted, rate = {uniform_rate:.4}"
+        );
+        eprintln!(
+            "[3D] EdgeList: {edge_list_real} real attempts, {edge_list_accepted} accepted, rate = {edge_list_rate:.4}"
+        );
+        eprintln!(
+            "[3D] rate ratio (EdgeList / Uniform) = {:.4}",
+            edge_list_rate / uniform_rate
+        );
+    }
+
+    /// 2D counterpart of
+    /// [`diag_real_attempt_acceptance_rate_uniform_vs_edge_list_3d`], same
+    /// method, matching `benches/scale.rs`'s `build_confluent_2d` fixture
+    /// (200x200, two cell types, phi=0.8) instead of the 3D one.
+    #[test]
+    #[ignore = "diagnostic only: run with --release -- --ignored --nocapture"]
+    #[cfg(not(feature = "fused-energy"))]
+    fn diag_real_attempt_acceptance_rate_uniform_vs_edge_list_2d() {
+        use crate::cell::CellType;
+        use crate::lattice::Boundary;
+
+        fn build_fixture(proposal: ProposalMode) -> CPM<2> {
+            let config = UserConfig::<2> {
+                grid: Some([200, 200]),
+                // Fixed, not Periodic — see the 3D variant's comment above
+                // for why (the unwrapped-position half-box guard is a no-op
+                // under `Fixed` by construction).
+                boundary: Some(Boundary::Fixed),
+                cell_types: vec![
+                    CellType {
+                        name: "a".into(),
+                        target_volume: 160,
+                        target_interface: 84,
+                        lambda_volume: 1.0,
+                        lambda_interface: 0.2,
+                        lambda_act: 0.0,
+                        max_act: 0,
+                    },
+                    CellType {
+                        name: "b".into(),
+                        target_volume: 160,
+                        target_interface: 84,
+                        lambda_volume: 1.5,
+                        lambda_interface: 0.3,
+                        lambda_act: 0.0,
+                        max_act: 0,
+                    },
+                ],
+                cell_counts: vec![100, 100],
+                adhesion: Some(vec![
+                    vec![0.0, 3.0, 3.0],
+                    vec![3.0, 1.0, 5.0],
+                    vec![3.0, 5.0, 1.0],
+                ]),
+                burn_in_mcs: Some(0),
+                readout_mcs: Some(1),
+                sampling_interval_mcs: Some(1),
+                seed: Some(1),
+                proposal: Some(proposal),
+                ..Default::default()
+            }
+            .resolve()
+            .unwrap();
+            let mut cpm = CPM::new(config).unwrap();
+            crate::initialization::initialize(&mut cpm).expect("fixture must initialise");
+            run_mcs(&mut cpm, 5);
+            cpm
+        }
+
+        const MCS_BUDGET: u64 = 200;
+
+        let mut uniform = build_fixture(ProposalMode::Uniform);
+        let (uniform_real, uniform_accepted) = measure_real_and_accepted(&mut uniform, MCS_BUDGET);
+
+        let mut edge_list = build_fixture(ProposalMode::EdgeList);
+        let (edge_list_real, edge_list_accepted) =
+            measure_real_and_accepted(&mut edge_list, MCS_BUDGET);
+
+        let uniform_rate = uniform_accepted as f64 / uniform_real as f64;
+        let edge_list_rate = edge_list_accepted as f64 / edge_list_real as f64;
+        eprintln!(
+            "[2D] Uniform:  {uniform_real} real attempts, {uniform_accepted} accepted, rate = {uniform_rate:.4}"
+        );
+        eprintln!(
+            "[2D] EdgeList: {edge_list_real} real attempts, {edge_list_accepted} accepted, rate = {edge_list_rate:.4}"
+        );
+        eprintln!(
+            "[2D] rate ratio (EdgeList / Uniform) = {:.4}",
+            edge_list_rate / uniform_rate
+        );
+    }
 }
