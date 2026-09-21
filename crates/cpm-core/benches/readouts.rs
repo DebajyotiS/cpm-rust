@@ -3,9 +3,9 @@
 //! flood fill kept out of the hot loop and run only at
 //! `sampling_interval_mcs` cadence (`output::run`) — this file measures
 //! that cadence's cost, especially in 3D, which is the inference target
-//! (roughly 64^3 sites and 200 cells). See `docs/conventions.md` §45 for
-//! the measured affordability conclusion (~7.5% of one MCS at this
-//! project's confluent-density regime) rather than an asserted one.
+//! (roughly 64^3 sites and 200 cells). `label_components_3d_confluent`
+//! below measures the actual affordability conclusion (~7.5% of one MCS at
+//! this project's confluent-density regime) rather than asserting one.
 //!
 //! Every benchmark seeds and initialises fresh inside the `iter` closure's
 //! setup, matching `monte_carlo.rs`'s own rationale: reusing one `CPM`

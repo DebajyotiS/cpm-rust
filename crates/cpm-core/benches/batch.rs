@@ -1,7 +1,8 @@
 //! Criterion benchmarks for `batch::run_batch`'s parallel scaling and its
-//! behaviour under per-item cost heterogeneity — the two things §44's own
-//! 9.05x speedup number (measured once, at N=12, homogeneous thetas, from a
-//! Python notebook wall-clock comparison) never exercised. Pure Rust, no
+//! behaviour under per-item cost heterogeneity — the two things the
+//! original 9.05x speedup number (measured once, at N=12, homogeneous
+//! thetas, from a Python notebook wall-clock comparison) never exercised.
+//! Pure Rust, no
 //! PyO3, consistent with "Rayon lives in `cpm-core`, not `cpm-py`" — the
 //! parallel loop this benchmarks is dimension-generic and testable without
 //! Python.
@@ -142,7 +143,7 @@ fn run_sequential(base_config: &ResolvedConfig<2>, thetas: &[Vec<f64>], master_s
 
 /// `run_batch` vs `run_sequential` at increasing `N`, homogeneous thetas
 /// (every batch member gets the identical `theta`), `ProposalMode::Uniform`
-/// — the scaling axis §44's single N=12 data point never swept.
+/// — the scaling axis the original single N=12 data point never swept.
 fn batch_scaling_homogeneous(c: &mut Criterion) {
     let config = base_config();
 

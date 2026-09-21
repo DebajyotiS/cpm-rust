@@ -929,8 +929,8 @@ mod tests {
         (real, accepted)
     }
 
-    /// A performance diagnostic testing §37's own leading, unconfirmed
-    /// hypothesis for why `ProposalMode::EdgeList` underperforms `Uniform`
+    /// A performance diagnostic testing the leading, unconfirmed hypothesis
+    /// for why `ProposalMode::EdgeList` underperforms `Uniform`
     /// at confluent density despite every individual overhead
     /// (`update_around`, the binomial draw, `EdgeList::sample`) already
     /// being ruled out as the cause: that `EdgeList` concentrates draws on
